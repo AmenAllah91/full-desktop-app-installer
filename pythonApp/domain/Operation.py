@@ -1,0 +1,7 @@
+from enum import Enum
+
+class Operation(Enum):
+    ADD_USER = "ADD_USER"
+    AUTHORIZE_USER = "AUTHORIZE_USER"
+    DELETE_USER = "DELETE_USER"
+    UNAUTHORIZE_USER = "UNAUTHORIZE_USER"
