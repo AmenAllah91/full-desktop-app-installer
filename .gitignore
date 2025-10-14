@@ -1,0 +1,20 @@
+# Ignorer le dossier de build global
+/build-output/
+
+# Ignorer les dossiers spécifiques à electron-app
+/electron-app/dist/
+/electron-app/node_modules/
+
+# Ignorer les dossiers spécifiques à pythonApp
+/pythonApp/venv/
+/pythonApp/.idea/
+
+# Autres fichiers/dossiers courants à ignorer
+# (optionnel mais recommandé)
+*.log
+.DS_Store
+Thumbs.db
+
+# Fichiers temporaires
+*.pyc
+__pycache__/

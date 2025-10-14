@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script>
+        const config = JSON.parse(require('fs').readFileSync('config.json', 'utf-8'));
+        localStorage.setItem('realm', config.tenant);
+        localStorage.setItem('GYM_BRANCH_ID', config.gymBranchId);
+        localStorage.setItem('currentGymBranchId', config.gymBranchId);
+        localStorage.setItem('TENANT', config.tenant);
+
+        setTimeout(() => {
+            location.href = 'http://localhost:4200';
+        }, 100);
+    </script>
+</head>
+<body>
+<p>Initialisation de la session, redirection...</p>
+</body>
+</html>

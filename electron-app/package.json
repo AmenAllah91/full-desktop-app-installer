@@ -1,0 +1,58 @@
+{
+  "name": "YoGym",
+  "version": "1.0.0",
+  "description": "A desktop application for managing biometric machines",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "electron-builder --win",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "biometric",
+    "machine",
+    "manager"
+  ],
+  "author": "Kamdigis.dev",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^29.4.6",
+    "electron-builder": "^24.12.0"
+  },
+  "build": {
+    "appId": "com.biometric.machinemanager",
+    "productName": "YoGym",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "./resources/yogymlogo.ico"
+    },
+    "nsis": {
+      "installerIcon": "./resources/yogymlogo.ico",
+      "uninstallerIcon": "./resources/yogymlogo.ico",
+      "installerHeaderIcon": "./resources/yogymlogo.ico",
+      "uninstallDisplayName": "YoGym"
+    },
+    "files": [
+      "main.js",
+      "/*",
+      "!/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!/node_modules/*/{test,tests,tests,powered-test,example,examples}",
+      "!/node_modules/*.d.ts",
+      "!/node_modules/.bin",
+      "!/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!/._*",
+      "!/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!/{pycache,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!/{appveyor.yml,.travis.yml,circle.yml}",
+      "!/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+    ]
+  },
+  "dependencies": {
+    "tree-kill": "^1.2.2"
+  }
+}
