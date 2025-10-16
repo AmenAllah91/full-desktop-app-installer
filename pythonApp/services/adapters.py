@@ -1,4 +1,5 @@
 # services/adapters.py
+import base64
 from abc import ABC, abstractmethod
 from enum import Enum
 import logging, time, ctypes, os
@@ -37,6 +38,9 @@ class DeviceAdapter(ABC):
 
     @abstractmethod
     def unauthorize_user(self, pin) -> bool: ...
+
+    @abstractmethod
+    def add_fingerprint(self,pin, fingerprint_template: bytes, finger_id: int, save_to_kafka: bool = True) -> bool: ...
 
 
 # -------------------------------------------------------- PLComm adapter
@@ -220,6 +224,317 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
     def authorize_user(self, pin):
         data = f"Pin={pin}\tAuthorizeTimezoneId=1\tAuthorizeDoorId=1\r\nPin={pin}\tAuthorizeTimezoneId=1\tAuthorizeDoorId=2"
         return self._set(b"userauthorize", data)
+
+    def add_fingerprint(self, user_id, fingerprint_template, finger_id):
+        """
+        Add a fingerprint template to the C3 device for a specific user.
+        Includes duplicate fingerprint detection.
+
+        Args:
+            user_id: User PIN/ID
+            fingerprint_template: Captured fingerprint template (bytes)
+            finger_id: Finger ID (0-9)
+
+        Returns:
+            dict: {'success': bool, 'message': str, 'error_type': str}
+        """
+        if not self.handle:
+            self.handle = self.connect()
+        if not self.handle:
+            logging.error("❌ Failed to connect to device")
+            return {'success': False, 'message': 'Device connection failed', 'error_type': 'connection'}
+
+        buffer_size = 10 * 1024 * 1024
+        buffer = ctypes.create_string_buffer(buffer_size)
+        table_name = "user".encode('utf-8')
+        filter_condition = f"Pin={user_id}\t".encode('utf-8')
+        options = "".encode('utf-8')
+        field_names = "*".encode('utf-8')
+
+        # Convert fingerprint template to bytes
+        if hasattr(fingerprint_template, 'tobytes'):
+            fingerprint_bytes = fingerprint_template.tobytes()
+        elif hasattr(fingerprint_template, 'data'):
+            fingerprint_bytes = fingerprint_template.data
+        else:
+            fingerprint_bytes = bytes(fingerprint_template)
+
+        fingerprint_template_base64 = base64.b64encode(fingerprint_bytes).decode('utf-8')
+
+        # Check if user exists
+        result = plcommpro.GetDeviceData(self.handle, buffer, buffer_size,
+                                         table_name, field_names, filter_condition, options)
+
+        # Create user if doesn't exist
+        if result <= 0:
+            logging.info(f"User {user_id} doesn't exist. Creating user...")
+            user_data = f"Pin={user_id}\tStartTime=20001021\tEndTime=20251231\t".encode('utf-8')
+            user_result = plcommpro.SetDeviceData(self.handle, b"user", user_data, None)
+
+            if user_result != 0:
+                logging.error(f"❌ Failed to create user {user_id}. Error code: {user_result}")
+                return {'success': False, 'message': f'User creation failed: {user_result}',
+                        'error_type': 'user_creation'}
+
+            logging.info(f"✅ User {user_id} created successfully")
+
+        # Check if this specific fingerprint slot is already occupied
+        template_check = plcommpro.GetDeviceData(
+            self.handle, buffer, buffer_size, b"templatev10", field_names,
+            f"Pin={user_id}\tFingerID={finger_id}\t".encode('utf-8'), options
+        )
+
+        if template_check > 0:
+            self.delete_fingerprint(user_id, finger_id)
+
+        # Check for duplicate fingerprints across ALL users
+        duplicate_check = self.check_duplicate_fingerprint(fingerprint_template_base64)
+        if duplicate_check['is_duplicate']:
+            logging.error(
+                f"❌ DUPLICATE FINGERPRINT DETECTED! Already enrolled for user: {duplicate_check['existing_user']}")
+            return {
+                'success': False,
+                'message': f"Fingerprint already enrolled for user {duplicate_check['existing_user']}",
+                'error_type': 'duplicate_fingerprint',
+                'existing_user': duplicate_check['existing_user'],
+                'existing_finger_id': duplicate_check['finger_id']
+            }
+
+        # Add fingerprint template
+        template_data = (
+            f"Size={len(fingerprint_template_base64)}\t"
+            f"UID={user_id}\t"
+            f"Pin={user_id}\t"
+            f"FingerID={finger_id}\t"
+            f"Valid=1\t"
+            f"Template={fingerprint_template_base64}\t"
+            f"Resverd=\t"
+            f"EndTag="
+        ).encode("utf-8")
+
+        result_template = plcommpro.SetDeviceData(self.handle, b"templatev10", template_data, None)
+
+        if result_template == 0:
+            logging.info(f"✅ Fingerprint added successfully for Pin={user_id}, FingerID={finger_id}")
+            return True
+        else:
+            logging.error(f"❌ Failed to add fingerprint. Error code: {result_template}")
+            error_msg = self.interpret_error_code(result_template)
+            return False
+
+    def check_duplicate_fingerprint(self, new_template_base64):
+        """
+        Check if the fingerprint template already exists for any user.
+
+        Args:
+            new_template_base64: Base64 encoded fingerprint template
+
+        Returns:
+            dict: {'is_duplicate': bool, 'existing_user': str, 'finger_id': int}
+        """
+        buffer_size = 10 * 1024 * 1024
+        buffer = ctypes.create_string_buffer(buffer_size)
+
+        # Get ALL fingerprint templates from device
+        result = plcommpro.GetDeviceData(
+            self.handle, buffer, buffer_size,
+            b"templatev10", b"*", b"", b""
+        )
+
+        if result <= 0:
+            logging.info("No existing templates found or error reading templates")
+            return {'is_duplicate': False, 'existing_user': None, 'finger_id': None}
+
+        # Parse the response
+        templates_data = buffer.value.decode('utf-8', errors='ignore')
+
+        for line in templates_data.split('\n'):
+            if not line.strip():
+                continue
+
+            # Parse template entry
+            fields = {}
+            for field in line.split('\t'):
+                if '=' in field:
+                    key, value = field.split('=', 1)
+                    fields[key] = value
+
+            if 'Template' in fields and 'Pin' in fields:
+                existing_template = fields['Template']
+
+                # Compare templates (basic string comparison)
+                # For more robust comparison, use biometric matching algorithms
+                if existing_template == new_template_base64:
+                    return {
+                        'is_duplicate': True,
+                        'existing_user': fields['Pin'],
+                        'finger_id': fields.get('FingerID', 'unknown')
+                    }
+
+        return {'is_duplicate': False, 'existing_user': None, 'finger_id': None}
+
+    def interpret_error_code(self, error_code):
+        """
+        Interpret ZKTeco error codes.
+
+        Args:
+            error_code: Error code from device
+
+        Returns:
+            str: Human-readable error message
+        """
+        error_messages = {
+            -1: "General error",
+            -2: "Device not connected",
+            -3: "Invalid parameter",
+            -4: "Operation timeout",
+            -5: "Data buffer too small",
+            -10: "Duplicate fingerprint detected",
+            -20: "Template quality too low",
+            -100: "Device memory full",
+        }
+
+        return error_messages.get(error_code, f"Unknown error code: {error_code}")
+
+    def delete_fingerprint(self, user_id, finger_id):
+        """
+        Delete a specific fingerprint from a user.
+
+        Args:
+            user_id: User PIN/ID (string or int)
+            finger_id: Finger ID to delete (0-9)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # Ensure we have a connection
+        if not self.handle:
+            logging.warning("No handle, attempting to connect...")
+            self.handle = self.connect()
+            if not self.handle:
+                logging.error("Failed to connect to device for delete operation")
+                return False
+
+        # Convert to string to ensure consistency
+        user_id = str(user_id)
+        finger_id = int(finger_id)
+
+        logging.info(f"Attempting to delete fingerprint: PIN={user_id}, FingerID={finger_id}")
+
+        try:
+            buffer_size = 10 * 1024 * 1024
+            buffer = ctypes.create_string_buffer(buffer_size)
+            table_name = "templatev10".encode('utf-8')
+            filter_condition = f"Pin={user_id}\t".encode('utf-8')
+            options = "".encode('utf-8')
+            field_names = "*".encode('utf-8')
+
+            # Use correct case-sensitive field names: PIN (uppercase)
+            check_result = plcommpro.GetDeviceData(
+                self.handle, buffer, buffer_size, table_name, field_names,
+                filter_condition, options
+            )
+
+            if check_result < 0:
+                logging.warning(f"Fingerprint not found: PIN={user_id}, FingerID={finger_id}")
+                return True  # Already deleted or doesn't exist
+
+            logging.info(f"Fingerprint exists (found {check_result} records), proceeding with deletion")
+
+            # Delete the fingerprint - format: "Field=Value" pairs separated by \t
+            # Based on doc: data = "Pin=2" for conditions of deleting the data
+            delete_filter = f"Pin={user_id}\tFingerID={finger_id}\tValid=1\tResverd=\tEndTag=".encode('utf-8')
+            logging.info(f"Delete filter: Pin={user_id}\\tFingerID={finger_id}")
+
+            result = plcommpro.DeleteDeviceData(
+                self.handle,
+                b"templatev10",
+                delete_filter,
+                None  # Options parameter - default is null as per documentation
+            )
+
+            if result == 0:
+                logging.info(f"Fingerprint deleted successfully: PIN={user_id}, FingerID={finger_id}")
+
+                # Verify deletion
+                buffer_size = 10 * 1024 * 1024
+                buffer = ctypes.create_string_buffer(buffer_size)
+                table_name = "templatev10".encode('utf-8')
+                filter_condition = f"Pin={user_id}\t".encode('utf-8')
+                options = "".encode('utf-8')
+                field_names = "*".encode('utf-8')
+
+                # Use correct case-sensitive field names: PIN (uppercase)
+                verify_result = plcommpro.GetDeviceData(
+                    self.handle, buffer, buffer_size, table_name, field_names,
+                    filter_condition, options
+                )
+
+                if verify_result < 0:
+                    logging.info("Verified: Fingerprint no longer exists")
+                else:
+                    logging.warning(f"Warning: Fingerprint still exists after delete (found {verify_result} records)")
+
+                return True
+            else:
+                logging.error(f"Failed to delete fingerprint. Error code: {result}")
+                logging.error(f"  Device: {self.machine.addresseip}")
+                logging.error(f"  Handle: {self.handle}")
+                logging.error(f"  Filter: PIN={user_id}\tFingerID={finger_id}")
+
+                # Common PLComm error codes
+                error_messages = {
+                    -1: "General error",
+                    -2: "Device not connected",
+                    -3: "Invalid parameter",
+                    -4: "Operation timeout",
+                    -5: "Buffer too small",
+                    -10: "Permission denied",
+                    -100: "Table not found",
+                    -101: "Invalid table name or field name (case-sensitive)",
+                    -102: "Invalid field value",
+                    1: "Record not found",
+                    2: "Multiple records found"
+                }
+
+                if result in error_messages:
+                    logging.error(f"  Error meaning: {error_messages[result]}")
+
+                return False
+
+        except OSError as exc:
+            logging.error(f"OSError during delete_fingerprint: {exc}")
+            # Connection might be broken, clear the handle
+            self.disconnect()
+            return False
+        except Exception as exc:
+            logging.exception(f"Unexpected error in delete_fingerprint: {exc}")
+            return False
+
+    def add_and_authorize_user(self, user_id, fingerprint_template, start_time, end_time, finger_id=1):
+        """
+        Add and authorize user - simplified version from your working code
+        """
+        if not self.handle:
+            logging.error("Cannot add user. Device is not connected.")  # Fixed: was logging.log
+            return
+
+        # Check if user exists
+        user_data_check = f"Pin={user_id}".encode('utf-8')
+        result_user_exists = plcommpro.SetDeviceData(self.handle, b"user", user_data_check, None)
+
+        if result_user_exists != 0:  # User doesn't exist
+            # Add user record with simple format
+            logging.info(f"User {user_id} does not exist. Adding new user.")  # Fixed: was logging.log
+            user_data = f"Pin={user_id}\tStartTime={start_time}\tEndTime={end_time}\t".encode('utf-8')
+            result_add_user = plcommpro.SetDeviceData(self.handle, b"user", user_data, None)
+
+            if result_add_user == 0:
+                logging.info(f"User {user_id} added successfully.")  # Fixed: was logging.log
+            else:
+                logging.error(f"Failed to add user. Error code: {result_add_user}")  # Fixed: was logging.log
+        else:
+            logging.info(f"User {user_id} already exists.")  # Fixed: was logging.log
 
     def unauthorize_user(self, pin):
         return self._del(b"userauthorize", f"Pin={pin}")

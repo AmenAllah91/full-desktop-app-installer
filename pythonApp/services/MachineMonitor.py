@@ -15,11 +15,11 @@ from services.addAndAuthorizeUser import connect_to_device
 # ------------------------------------------------------------------ #
 from os import getenv
 
-from services.websocket import broadcast_ws
+from services.websocket import send_pointage
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 pl = ctypes.CDLL(PLCOMPRO_URL)
-
+gymbranchId = getenv("GYM_BRANCH_ID")
 pl.Connect.argtypes = [c_char_p]
 pl.Connect.restype = c_void_p
 pl.Disconnect.argtypes = [c_void_p]
@@ -220,7 +220,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 )
                 kafka.produce("rt_" + TENANT, payload)
                 try:
-                    broadcast_ws(json.loads(payload))
+                    send_pointage(json.loads(payload),"1003")
                 except Exception as ex:
                     print(f"[WebSocket] Erreur envoi WS: {ex}")
                 logging.info("📡 %s → %s", ip, payload)

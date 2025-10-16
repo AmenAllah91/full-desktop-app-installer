@@ -9,10 +9,12 @@ import time
 import json
 import sqlite3
 
+from domain import Operation
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
+from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
 from services.MachineMonitor import monitor_machine
 
@@ -86,6 +88,7 @@ tenant =os.getenv("TENANT")
 # el kafka service service bech nal9aw fiha el connection m3a el server eli fyha kafka "broker" w nal9aw methods kima el produce w el consume
 pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
 publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
+fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
 
 machineService = AccessMachineService()
 
@@ -110,6 +113,7 @@ MONITORING_INTERVAL = 0.1
 
 TOPIC_CONSUME_PUBLISH_PHOTO = "launch_publish_photo"
 TOPIC_PRODUCE_PUBLISH_PHOTO = "finish_publish_photo"
+
 
 def initialize_task_queue_db():
     """Initialize the SQLite database for task queue."""
@@ -209,9 +213,9 @@ def free_port(port, retries=3):
 
 
 def process_device_queue() -> None:
-    POLL_SLEEP = 0.001  # s – pause si queue vide
+    POLL_SLEEP = 0.5  # s – pause si queue vide
     MAX_RETRIES = 3
-    RETRY_SLEEP = 0.01  # s – pause entre deux essais
+    RETRY_SLEEP = 1  # s – pause entre deux essais
     WAIT_HANDLE = 1  # s – délai max pour qu’un C3 ouvre le handle
 
     while not stop_event_monitoring.is_set():
@@ -253,7 +257,6 @@ def process_device_queue() -> None:
                 with ctx.lock:
                     if op == "ADD_USER":
                         ok = adapter.add_user(pin,
-                                              task["user_name"],
                                               task["card_no"],
                                               task["start_date"],
                                               task["end_date"])
@@ -268,7 +271,17 @@ def process_device_queue() -> None:
 
                     elif op == "UNAUTHORIZE_USER":
                         ok = adapter.unauthorize_user(pin)
-
+                    elif op == "ADD_FINGERPRINT":
+                        fingerprint_template_base64 = task["fingerprint_template"]
+                        template_bytes = base64.b64decode(fingerprint_template_base64)
+                        logging.info(f"Decoded fingerprint template: {len(template_bytes)} bytes")
+                        ok = adapter.add_fingerprint(
+                            pin,
+                            fingerprint_template=template_bytes,
+                            finger_id=task["finger_id"]
+                        )
+                    elif op == "REMOVE_FINGERPRINT":
+                        ok = adapter.delete_fingerprint(pin, task["finger_id"])
                     else:
                         raise ValueError(f"Opération inconnue : {op}")
 
@@ -291,8 +304,6 @@ def process_device_queue() -> None:
             logging.error("❌ Tâche #%s abandonnée après %s échecs",
                           task_id, MAX_RETRIES)
             mark_task_as_completed(task_id)
-
-
 
 
 def process_message_pointage(message):
@@ -320,18 +331,44 @@ def process_message_pointage(message):
         print(f"Error processing pointage_client json_message: {e}")
 
 
+def process_fingerprint_actions(message):
+    json_message = json.loads(message)
+    print(f"Received message from new access request  topic from trenant {tenant}:", message)
+    required_keys = ["pin", "operation", "fingerprint_template",
+                     "finger_id"]
+    machines = machineService.get_access_machines(gym_branch_id, tenant)
+    if all(key in json_message for key in required_keys):
+        for machine in machines:
+            add_task_to_queue({
+                "machineId": machine.id,
+                "ip_address": machine.addresseip,
+                "port": str(machine.port),
+                "user_pin": json_message["pin"],
+                "operation": json_message["operation"],
+                "finger_id": json_message["finger_id"],
+                "fingerprint_template": json_message["fingerprint_template"]
+            })
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
 
 
 def consume_pointage_client():
     while not stop_event_kafka.is_set():
         try:
-            pointage_kafka.consume(topic='new_access_request_'+ tenant, on_message=process_message_pointage)
+            pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
         except Exception as e:
             print(f"Error in pointage client consumption loop: {e}")
+            time.sleep(1)
+
+
+def consume_fingerprint_client():
+    while not stop_event_kafka.is_set():
+        try:
+            fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
+        except Exception as e:
+            print(f"Error in fingerprint actions consumption loop: {e}")
             time.sleep(1)
 
 
@@ -351,10 +388,10 @@ def capture_fingerprint_api(user_pin, gym_branch_id, machine_id):
 @app.route('/curentconf', methods=['GET'])
 def curentconf():
     try:
-        payload =   payload = {
-                "gymbranchId": currentGymBranchId,
-                "tenant": tenant
-            }
+        payload = payload = {
+            "gymbranchId": currentGymBranchId,
+            "tenant": tenant
+        }
         if payload:
             return jsonify(payload), 200
         else:
@@ -362,6 +399,7 @@ def curentconf():
     except Exception as e:
         logging.error(f"❌ Error in capture_fingerprint_api: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 def consume_publish_photo():
     def handle_photo_publish(message):
@@ -384,6 +422,7 @@ def consume_publish_photo():
         except Exception as e:
             logging.error("Error in publish photo consumption loop: %s", e)
             time.sleep(3)
+
 
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
     if gym_branch_id != currentGymBranchId:
@@ -414,17 +453,17 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
             logging.error(f"❌ Failed to download photo for user {user_pin}.")
             return None
 
+
 # Start separate Kafka consumer threads
 def start_kafka_consumers():
-
-
     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
-
+    fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
+                                                  name="FingerprintActionsThread")
 
     pointage_thread.start()
     photo_publish_thread.start()
-
+    fingerprint_actions_thread.start()
     print("Kafka consumer threads started")
 
 
@@ -434,17 +473,21 @@ def cleanup_resources(driver=None):
     stop_event_monitoring.set()
     stop_event_kafka.set()
     print("Application shutdown complete")
+
+
 # imports (en haut de ton main)
 from werkzeug.utils import secure_filename
 from pathlib import Path
 
 UPLOAD_DIR = Path(TEMP_DIR) / "faces"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
 @app.route('/face/upload', methods=['POST'])
 def upload_face_multipart():
-    pin          = request.form.get('pin')
+    pin = request.form.get('pin')
     gym_branchId = request.form.get('gymBranchId')
-    file         = request.files.get('photo')
+    file = request.files.get('photo')
 
     # ----- validations basiques -----
     if not all([pin, gym_branchId, file]):
@@ -487,9 +530,105 @@ def upload_face_multipart():
 
     return jsonify({"pin": pin, "result": report}), 200
 
+
+
+@app.route('/fingerprint/upload', methods=['POST'])
+def upload_fingerprint():
+    """
+    Upload fingerprint to ALL adapters/machines for the current gym branch
+    """
+    try:
+        data = request.get_json()
+        if not data or "pin" not in data:
+            return jsonify({"error": "Missing 'pin' in request"}), 400
+
+        pin = data["pin"]
+        gym_branch_id = data.get("gymBranchId", currentGymBranchId)
+        finger_id = data.get("fingerId")
+        # Validate gym branch
+        if str(gym_branch_id) != str(currentGymBranchId):
+            return jsonify({"error": "gymBranchId mismatch"}), 400
+        logging.info(f" Starting fingerprint upload for PIN {pin}")
+
+        # Capture fingerprint once
+        capture = FingerprintCapture()
+        template_bytes, images = capture.capture_fingerprint(save_file=False)
+
+        if not template_bytes:
+            return jsonify({"error": "Failed to capture fingerprint"}), 500
+
+        logging.info(f" Fingerprint captured successfully. Template size: {len(template_bytes)} bytes")
+
+        # Upload to ALL adapters in the current gym branch
+        results = {}
+        success_count = 0
+        total_count = 0
+
+        for machine_id, ctx in DeviceManager._registry.items():
+            # Skip machines not belonging to current gym branch
+            if str(ctx.gymBranchId) != str(currentGymBranchId):
+                continue
+
+            total_count += 1
+            adapter = ctx.adapter
+            machine_ip = ctx.machine.addresseip
+
+            try:
+                logging.info(f" Uploading to machine {machine_ip} (ID: {machine_id})")
+                with ctx.lock:
+                    success = adapter.add_fingerprint(
+                        user_id=pin,
+                        fingerprint_template=template_bytes,
+                        finger_id=finger_id
+                    )
+
+                if success:
+                    results[machine_ip] = "SUCCESS"
+                    success_count += 1
+                    logging.info(f" Fingerprint uploaded successfully to {machine_ip}")
+                else:
+                    results[machine_ip] = "FAILED"
+                    logging.error(f" Failed to upload fingerprint to {machine_ip}")
+            except Exception as e:
+                results[machine_ip] = f"ERROR: {str(e)}"
+                logging.error(f" Exception uploading to {machine_ip}: {e}")
+
+        python_bytes = bytes(bytearray(template_bytes))
+        encoded_template = base64.b64encode(python_bytes).decode('utf-8')
+        payload = {"fingerprint_template": encoded_template, "pin": pin, "gymBranchId": gym_branch_id,
+                   "operation": Operation.ADD_FINGERPRINT.value, "finger_id": finger_id}
+        # Prepare response
+        if success_count == 0:
+            return jsonify({
+                "error": f"Failed to upload fingerprint to all {total_count} machines",
+                "results": results
+            }), 500
+        elif success_count < total_count:
+            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
+            return jsonify({
+                "warning": f"Partial success: {success_count}/{total_count} machines",
+                "results": results,
+                "pin": pin,
+                "fingerprint_template": encoded_template
+            }), 207
+        else:
+            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
+            return jsonify({
+                "message": f"Fingerprint uploaded successfully to all {total_count} machines",
+                "results": results,
+                "pin": pin,
+                "fingerprint_template": encoded_template
+            }), 200
+
+    except Exception as e:
+        logging.exception(f" Fatal error in fingerprint upload: {e}")
+        return jsonify({"error": f"Exception during fingerprint upload: {str(e)}"}), 500
+
+
 @app.route('/config/gymBranchId', methods=['GET'])
 def get_gym_branch_id():
     return {"gymBranchId": currentGymBranchId}
+
 
 # -------------------------------------------------------------
 #  ROUTE :  POST /tasks/access
@@ -503,6 +642,7 @@ REQUIRED_TOP = {
     "machines"
 }
 REQUIRED_MACHINE = {"id", "addresseip", "port", "type"}
+
 
 @app.route('/tasks/access', methods=['POST'])
 def enqueue_access_tasks():
@@ -544,6 +684,7 @@ def enqueue_access_tasks():
 
     return jsonify({"status": "queued", "tasksQueued": queued}), 201
 
+
 # ---------------------------------------------------------------------------
 # 2) main  — initialisation complète de l’application
 # ---------------------------------------------------------------------------
@@ -553,6 +694,7 @@ if __name__ == '__main__':
         logging.info("🚨 Reçu SIGTERM, fermeture propre en cours...")
         cleanup_resources()
         sys.exit(0)
+
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     start_ws_server()

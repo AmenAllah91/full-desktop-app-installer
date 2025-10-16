@@ -30,14 +30,16 @@ echo.
 :: Step 2: Build Python App
 echo 🐍 Building Python application...
 cd /d "%PYTHON_APP_DIR%"
-python -m PyInstaller pythonApp.exe.spec
+python -m PyInstaller --onefile --name=pythonApp main.py
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
     exit /b 1
 )
 copy /y "dist\pythonApp.exe" "..\%OUTPUT_DIR%\python\"
 copy /y ".env" "..\%OUTPUT_DIR%\python\"
+copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
+del "pythonApp.spec"
 cd ..
 echo.
 
@@ -243,6 +245,7 @@ if exist "python\pythonApp.exe" (
     echo Copying Python app...
     copy /y "python\pythonApp.exe" "installer\"
     copy /y "python\.env" "installer\"
+    copy /y "python\libzkfpcsharp.dll" "installer\"
     echo. > installer\task_queue.db
 ) else (
     echo ⚠️ Warning: pythonApp.exe not found!

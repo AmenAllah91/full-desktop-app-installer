@@ -7,7 +7,7 @@ import pywintypes
 from domain import AccessMachine
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
-from services.websocket import broadcast_ws
+from services.websocket import send_pointage
 
 
 # ------------------------------------------------------------------ #
@@ -27,11 +27,12 @@ def zkem_last_error(zk) -> Union[int, str]:
         except Exception:
             return "?"
 
+
 # ------------------------------------------------------------------ #
 # 1) Classe réceptrice d’événements COM
 # ------------------------------------------------------------------ #
 class ZkemEvents:
-    def __init__(self, m:AccessMachine, ip: str, tenant: str, gym_branch_id: str):
+    def __init__(self, m: AccessMachine, ip: str, tenant: str, gym_branch_id: str):
         self.ip = ip
         self.m = m
         self.tenant = tenant
@@ -59,9 +60,10 @@ class ZkemEvents:
         print(payload)
         self.kafka.produce("rt_" + self.tenant, payload)
         try:
-            broadcast_ws(json.loads(payload))  # convertit string JSON → dict
+            send_pointage(json.loads(payload), "1003")  # convertit string JSON → dict
         except Exception as ex:
             print(f"[WebSocket] Erreur envoi WS: {ex}")
+
 
 # ------------------------------------------------------------------ #
 # 2) Thread de surveillance temps-réel — version sans conflit
