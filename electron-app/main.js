@@ -103,7 +103,7 @@ function spawnPythonProcess(config) {
 
     pythonProcess.stdout.on('data', (data) => console.log(`[PYTHON] ${data}`));
     pythonProcess.stderr.on('data', (data) => console.error(`[PYTHON ERROR] ${data}`));
-    
+
     pythonProcess.on('close', (code) => {
         console.log(`[PYTHON] Process exited with code ${code}`);
         pythonProcess = null;
@@ -135,7 +135,7 @@ function promptConfig(callback) {
 
     promptWin.loadURL(
         'data:text/html,' +
-            encodeURIComponent(`
+        encodeURIComponent(`
         <html>
             <body style="font-family: sans-serif; padding: 20px;">
                 <h3>Configuration initiale</h3>
@@ -191,7 +191,7 @@ function createWindow(config) {
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><body></body></html>'));
 
     setTimeout(() => {
-        win.loadURL('https://integration.yogym.co');
+        win.loadURL('http://localhost:4200');
         win.show();
     }, 100);
 

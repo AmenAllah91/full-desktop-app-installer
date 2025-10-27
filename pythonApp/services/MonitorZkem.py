@@ -7,7 +7,7 @@ import pywintypes
 from domain import AccessMachine
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
-from services.websocket import broadcast_ws
+from services.websocket import send_pointage
 
 
 # ------------------------------------------------------------------ #
@@ -31,7 +31,7 @@ def zkem_last_error(zk) -> Union[int, str]:
 # 1) Classe réceptrice d’événements COM
 # ------------------------------------------------------------------ #
 class ZkemEvents:
-    def __init__(self, m:AccessMachine, ip: str, tenant: str, gym_branch_id: str):
+    def __init__(self, m: AccessMachine, ip: str, tenant: str, gym_branch_id: str):
         self.ip = ip
         self.m = m
         self.tenant = tenant

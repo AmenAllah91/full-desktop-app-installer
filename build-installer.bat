@@ -30,14 +30,16 @@ echo.
 :: Step 2: Build Python App
 echo 🐍 Building Python application...
 cd /d "%PYTHON_APP_DIR%"
-python -m PyInstaller pythonApp.exe.spec
+python -m PyInstaller --onefile --name=pythonApp main.py
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
     exit /b 1
 )
 copy /y "dist\pythonApp.exe" "..\%OUTPUT_DIR%\python\"
 copy /y ".env" "..\%OUTPUT_DIR%\python\"
+copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
+del "pythonApp.spec"
 cd ..
 echo.
 
@@ -47,7 +49,7 @@ if not exist "%SETUP_DLLS_DIR%" (
     echo ❌ Error: setupDlls directory not found!
     echo Current directory: %cd%
     echo Looking for setupDlls.py...
-    
+
     for /f "delims=" %%i in ('dir /b /s setupDlls.py 2^>nul') do (
         echo 🔍 Found setupDlls.py at: %%i
         set SETUP_DLLS_PATH=%%~dpi
@@ -55,7 +57,7 @@ if not exist "%SETUP_DLLS_DIR%" (
         echo Changed directory to: %%~dpi
         goto :build_setup_dlls
     )
-    
+
     echo ❌ setupDlls.py not found!
     exit /b 1
 ) else (
@@ -116,7 +118,7 @@ call npm run build --dry-run >nul 2>&1
 if errorlevel 1 (
     echo ⚠️ No 'build' script found in package.json
     echo 🔍 Looking for alternative build commands...
-    
+
     :: Try alternative build commands
     call npm run dist --dry-run >nul 2>&1
     if not errorlevel 1 (
@@ -140,11 +142,11 @@ if errorlevel 1 (
                 ) else (
                     echo ❌ No build script found! Available scripts:
                     call npm run
-                    
+
                     echo.
                     echo 📄 Contents of package.json:
                     type package.json
-                    
+
                     echo.
                     echo ⚠️ Proceeding without building Electron app...
                     mkdir "dist\win-unpacked" 2>nul
@@ -180,7 +182,7 @@ if exist "dist\win-unpacked" (
     dir dist /b 2>nul
     dir out /b 2>nul
     dir build /b 2>nul
-    
+
     echo.
     echo 📑 Creating placeholder Electron files...
     if not exist "..\%OUTPUT_DIR%\electron" mkdir "..\%OUTPUT_DIR%\electron" 2>nul
@@ -243,6 +245,7 @@ if exist "python\pythonApp.exe" (
     echo Copying Python app...
     copy /y "python\pythonApp.exe" "installer\"
     copy /y "python\.env" "installer\"
+    copy /y "python\libzkfpcsharp.dll" "installer\"
     echo. > installer\task_queue.db
 ) else (
     echo ⚠️ Warning: pythonApp.exe not found!
@@ -269,6 +272,110 @@ if exist "resources" (
     echo This is a placeholder for resources > "installer\resources\README.txt"
 )
 
+echo Cloning & building Angular application...
+
+:: Remove existing folder if exists
+cd ..
+if exist "angular-temp" rmdir /s /q "angular-temp"
+if exist "angular-dist" rmdir /s /q "angular-dist"
+
+git clone -b integration-desktop https://github.com/AmenAllah91/empire-gym-app-front.git angular-temp
+if errorlevel 1 (
+    echo Git clone failed!
+    exit /b 1
+)
+
+cd angular-temp
+echo Installing Angular dependencies...
+call npm install
+if errorlevel 1 (
+    echo Angular npm install failed!
+    exit /b 1
+)
+
+echo 🔨 Building Angular...
+call ng build
+if errorlevel 1 (
+    echo Angular build failed!
+    exit /b 1
+)
+cd ..
+mkdir "angular-dist\" 2>nul
+xcopy /e /i /y "angular-temp\dist\*" "angular-dist"
+if exist "angular-temp" rmdir /s /q "angular-temp"
+echo Angular build completed!
+cd /d "%OUTPUT_DIR%"
+echo.
+
+echo Copy Angular dist folder...
+:: Copy Angular dist folder
+if exist "..\angular-dist" (
+    echo Copying Angular dist folder...
+    mkdir "%APPDATA%\YoGym\angular-dist\" 2>nul
+    xcopy /e /i /y "..\angular-dist\*" "%APPDATA%\YoGym\angular-dist\"
+) else (
+    echo  Angular dist folder not found!
+)
+
+
+:: Copy Angular dist folder
+if exist "..\angular-dist" (
+    echo Copying Angular dist folder...
+    mkdir "installer\angular-dist\" 2>nul
+    xcopy /e /i /y "..\angular-dist\*" "installer\angular-dist\"
+) else (
+    echo  Angular dist folder not found!
+)
+
+
+
+
+echo Cloning & building Spring Boot application...
+
+:: Remove existing folder if exists
+cd ..
+if exist "spring-boot-temp" rmdir /s /q "spring-boot-temp"
+if exist "spring-boot" rmdir /s /q "spring-boot"
+
+git clone -b feat/224/integration-desktop https://github.com/AmenAllah91/empire-gym-manager.git spring-boot-temp
+if errorlevel 1 (
+    echo Git clone failed!
+    exit /b 1
+)
+
+cd spring-boot-temp
+echo Installing mvn dependencies...
+call mvn clean install
+if errorlevel 1 (
+    echo mvn clean install failed!
+    exit /b 1
+)
+
+cd ..
+mkdir "spring-boot\" 2>nul
+xcopy /e /i /y "spring-boot-temp\target\gym-management-app-0.0.1-SNAPSHOT.jar" "spring-boot"
+if exist "spring-boot-temp" rmdir /s /q "spring-boot-temp"
+echo Jar build completed!
+cd /d "%OUTPUT_DIR%"
+echo.
+
+:: Copy Spring Boot jar
+if exist "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" (
+    echo Copying Spring Boot jar...
+    mkdir "%APPDATA%\YoGym\spring-boot\" 2>nul
+    copy /y "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" "%APPDATA%\YoGym\spring-boot\"
+) else (
+    echo  Spring Boot jar not found!
+)
+
+:: Copy Spring Boot jar
+if exist "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" (
+    echo Copying Spring Boot jar...
+    mkdir "installer\spring-boot\" 2>nul
+    copy /y "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" "installer\spring-boot\"
+) else (
+    echo  Spring Boot jar not found!
+)
 
 
 echo.

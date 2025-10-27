@@ -1,14 +1,16 @@
 # adapters/zkem_adapter.py
-import gc
+import base64
 import logging
 import ctypes
 import os
 import subprocess
-import time
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Union
+from win32com.client import VARIANT
+
 
 import pythoncom
 import pywintypes
@@ -235,6 +237,118 @@ class ZkemAdapter(DeviceAdapter):
         self.zk.EnableDevice(self.mn, True)
         return ok
 
+    @staticmethod
+    def bytes_to_long_array(template_bytes) -> list[int]:
+
+        """
+        Convert fingerprint bytes into list of 32-bit unsigned integers for SetEnrollData.
+        Each int is 4 bytes in little-endian order.
+        """
+        # Make sure it's plain bytes
+        if not isinstance(template_bytes, (bytes, bytearray)):
+            template_bytes = bytes(template_bytes)
+
+        # Pad to multiple of 4
+        pad_len = (4 - len(template_bytes) % 4) % 4
+        template_bytes += b'\x00' * pad_len
+
+        longs = []
+        for i in range(0, len(template_bytes), 4):
+            val = int.from_bytes(template_bytes[i:i + 4], byteorder='little', signed=False)
+            longs.append(val)
+
+        return longs
+
+    @_ensure_conn
+    def add_fingerprint(self, user_id: str, fingerprint_template: bytes, finger_id: int) -> bool:
+        """
+        Add a fingerprint template to the ZK device for a specific user.
+
+        Args:
+            user_id: User PIN/ID (string, e.g. "1001")
+            fingerprint_template: Captured fingerprint template (bytes, ZK format)
+            finger_id: Finger ID (0-9, where 0=Thumb)
+        """
+        if not self.zk:
+            logging.error(" ZK device not connected")
+            return False
+
+        try:
+            name, password, privilege, enabled = "", "", 0, True
+            exists = self.zk.SSR_GetUserInfo(self.mn, str(user_id), name, password, privilege, enabled)
+            if not exists[0]:
+                logging.info(f" User {user_id} does not exist, creating...")
+                ok = self.zk.SSR_SetUserInfo(self.mn, str(user_id), f"User{user_id}", "", 0, True)
+                if not ok:
+                    logging.error(f"Failed to create user {user_id}")
+                    return False
+            if hasattr(fingerprint_template, 'tobytes'):
+                fingerprint_bytes = fingerprint_template.tobytes()
+            elif hasattr(fingerprint_template, 'data'):
+                fingerprint_bytes = fingerprint_template.data
+            else:
+                fingerprint_bytes = bytes(fingerprint_template)
+
+            fingerprint_template_base64 = base64.b64encode(fingerprint_bytes).decode('utf-8')
+
+            success = self.zk.SetUserTmpExStr(
+                int(self.mn),  # LONG dwMachineNumber
+                int(user_id),  # LONG dwEnrollNumber
+                int(finger_id),  # LONG dwFingerIndex
+                int(1),  # LONG Flag
+                fingerprint_template_base64  # BSTR TmpData
+            )
+
+            if success:
+                logging.info(f"Fingerprint added successfully for User={user_id}, FingerID={finger_id}")
+                return True
+            else:
+                logging.error(f"Failed to add fingerprint for User={user_id}, FingerID={finger_id} (err={zkem_last_error(self.zk)})")
+                return False
+
+        except Exception as e:
+            logging.exception(f"Exception in add_fingerprint for User={user_id}: {e}")
+            return False
+
+    @_ensure_conn
+    def delete_fingerprint(self, pin: str, finger_id: int) -> bool:
+        """
+        Delete a specific fingerprint template from the ZK device.
+
+        Args:
+            pin: User PIN/ID (string, e.g. "1001")
+            finger_id: Finger ID to delete (0-9, where 0=Thumb)
+
+        Returns:
+            True if fingerprint was deleted successfully, False otherwise
+        """
+        if not self.zk:
+            logging.error("❌ ZK device not connected")
+            return False
+
+        try:
+            self.zk.EnableDevice(self.mn, False)
+            success = self.zk.SSR_DeleteEnrollDataExt(
+                self.mn,  # Machine number
+                str(pin),  # User PIN
+                int(finger_id)  # Finger ID (0-9)
+            )
+
+            if success:
+                logging.info(f"Fingerprint deleted for PIN={pin}, FingerID={finger_id}")
+
+            return True
+
+        except Exception as e:
+            logging.exception(f"Exception in delete_fingerprint for PIN={pin}, FingerID={finger_id}: {e}")
+            return False
+
+        finally:
+            try:
+                self.zk.RefreshData(self.mn)
+                self.zk.EnableDevice(self.mn, True)
+            except Exception:
+                pass
 
 def zkem_last_error(zk) -> Union[int, str]:
     """
