@@ -269,6 +269,42 @@ if exist "resources" (
     echo This is a placeholder for resources > "installer\resources\README.txt"
 )
 
+:: Copy Angular dist folder
+if exist "..\angular-dist" (
+    echo Copying Angular dist folder...
+    mkdir "%APPDATA%\YoGym\angular-dist\" 2>nul
+    xcopy /e /i /y "..\angular-dist\*" "%APPDATA%\YoGym\angular-dist\"
+) else (
+    echo  Angular dist folder not found!
+)
+
+:: Copy Spring Boot jar
+if exist "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" (
+    echo Copying Spring Boot jar...
+    mkdir "%APPDATA%\YoGym\spring-boot\" 2>nul
+    copy /y "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" "%APPDATA%\YoGym\spring-boot\"
+) else (
+    echo  Spring Boot jar not found!
+)
+
+
+:: Copy Angular dist folder
+if exist "..\angular-dist" (
+    echo Copying Angular dist folder...
+    mkdir "installer\angular-dist\" 2>nul
+    xcopy /e /i /y "..\angular-dist\*" "installer\angular-dist\"
+) else (
+    echo  Angular dist folder not found!
+)
+
+:: Copy Spring Boot jar
+if exist "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" (
+    echo Copying Spring Boot jar...
+    mkdir "installer\spring-boot\" 2>nul
+    copy /y "..\spring-boot\gym-management-app-0.0.1-SNAPSHOT.jar" "installer\spring-boot\"
+) else (
+    echo  Spring Boot jar not found!
+)
 
 
 echo.

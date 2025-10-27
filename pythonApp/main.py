@@ -8,6 +8,9 @@ import logging
 import time
 import json
 import sqlite3
+import subprocess
+import socket
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
@@ -23,6 +26,11 @@ from dotenv import load_dotenv, set_key
 
 from services.websocket import start_ws_server
 
+class SPARequestHandler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/" and not os.path.exists(self.translate_path(self.path)):
+            self.path = "/index.html"
+        return super().do_GET()
 
 def get_app_data_dir():
     print("[INFO] Trying to get APPDATA environment variable...")
@@ -34,7 +42,7 @@ def get_app_data_dir():
     else:
         print(f"[INFO] APPDATA found: {app_data}")
 
-    app_dir = os.path.join(app_data, 'desktop-app')  # Replace 'desktop-app' with your actual app name
+    app_dir = os.path.join(app_data, 'desktop-app')
     print(f"[INFO] Full application directory path: {app_dir}")
 
     os.makedirs(app_dir, exist_ok=True)
@@ -78,8 +86,6 @@ initialize_env_file()
 KafkaBroker = os.getenv("KAFKA_BROKER")
 
 # Flask application initialization
-app = Flask(__name__)
-CORS(app)
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant =os.getenv("TENANT")
 # Kafka service configuration
@@ -111,6 +117,8 @@ MONITORING_INTERVAL = 0.1
 TOPIC_CONSUME_PUBLISH_PHOTO = "launch_publish_photo"
 TOPIC_PRODUCE_PUBLISH_PHOTO = "finish_publish_photo"
 
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://localhost:4200"}}, supports_credentials=True)
 def initialize_task_queue_db():
     """Initialize the SQLite database for task queue."""
     conn = sqlite3.connect(DB_FILE)
@@ -126,6 +134,55 @@ def initialize_task_queue_db():
     conn.commit()
     conn.close()
 
+
+def resource_path(relative_path: str, subfolder: str = None) -> str:
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if subfolder:
+        base_dir = os.path.join(base_dir, subfolder)
+
+    return os.path.join(base_dir, relative_path)
+
+
+def check_file(path: str, description: str) -> bool:
+    if os.path.exists(path):
+        return True
+    else:
+        print(f"{description} introuvable : {path}")
+        return False
+
+def start_http_server(directory: str, port: int) -> bool:
+    if not os.path.isdir(directory):
+        return False
+
+    os.chdir(directory)
+    httpd = HTTPServer(("127.0.0.1", port), SPARequestHandler)
+
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"Angular frontend démarré sur http://localhost:{port}")
+    return True
+def start_angular():
+    angular_dir = resource_path("", subfolder="angular-dist/yo-gym")
+    start_http_server(angular_dir, 4200)
+    if not wait_for_angular(host="127.0.0.1", port=4200, timeout=60):
+        print("Angular n'a pas démarré correctement, vérifiez les logs")
+    else:
+        print("Angular frontend started")
+
+def start_spring():
+    spring_jar = resource_path("gym-management-app-0.0.1-SNAPSHOT.jar", subfolder="spring-boot")
+    if check_file(spring_jar, "Spring Boot JAR"):
+        subprocess.Popen(
+            ["java", "-jar", spring_jar, "--spring.profiles.active=desktop"],
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    if not wait_for_spring_boot(host="127.0.0.1", port=8081, timeout=300):
+        print("Spring Boot n'a pas démarré correctement, vérifiez les logs")
+    else:
+        print("Spring Boot backend started")
 
 def add_task_to_queue(task):
     """Add a task to the SQLite queue."""
@@ -344,7 +401,7 @@ def capture_fingerprint_api(user_pin, gym_branch_id, machine_id):
         else:
             return jsonify({"error": "Photo not found or machine not valid"}), 400
     except Exception as e:
-        logging.error(f"❌ Error in capture_fingerprint_api: {e}")
+        logging.error(f" Error in capture_fingerprint_api: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -360,7 +417,7 @@ def curentconf():
         else:
             return jsonify({"error": "Photo not found or machine not valid"}), 400
     except Exception as e:
-        logging.error(f"❌ Error in capture_fingerprint_api: {e}")
+        logging.error(f" Error in capture_fingerprint_api: {e}")
         return jsonify({"error": str(e)}), 500
 
 def consume_publish_photo():
@@ -376,7 +433,7 @@ def consume_publish_photo():
             process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
 
         except Exception as e:
-            logging.error(f"❌ Error processing launch_publish_photo message: {e}")
+            logging.error(f" Error processing launch_publish_photo message: {e}")
 
     while not stop_event_kafka.is_set():
         try:
@@ -418,11 +475,7 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
 def start_kafka_consumers():
 
 
-    pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
-
-
-    pointage_thread.start()
     photo_publish_thread.start()
 
     print("Kafka consumer threads started")
@@ -547,10 +600,41 @@ def enqueue_access_tasks():
 # ---------------------------------------------------------------------------
 # 2) main  — initialisation complète de l’application
 # ---------------------------------------------------------------------------
+def wait_for_spring_boot(host="127.0.0.1", port=8081, timeout=120):
+    start_time = time.time()
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                print(f"Spring Boot prêt sur {host}:{port}")
+                return True
+        except OSError:
+            if time.time() - start_time > timeout:
+                print(f"Timeout : Spring Boot non disponible sur {host}:{port} après {timeout}s")
+                return False
+            time.sleep(1)
 
+def wait_for_angular(host="127.0.0.1", port=4200, timeout=120):
+    start_time = time.time()
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                print(f"Angular prêt sur {host}:{port}")
+                return True
+        except OSError:
+            if time.time() - start_time > timeout:
+                print(f"Timeout : Angular non disponible sur {host}:{port} après {timeout}s")
+                return False
+            time.sleep(1)
 if __name__ == '__main__':
+
+    spring_thread = threading.Thread(target=start_spring)
+    spring_thread.start()
+    angular_thread = threading.Thread(target=start_angular)
+    angular_thread.start()
+    spring_thread.join()
+
     def handle_sigterm(signum, frame):
-        logging.info("🚨 Reçu SIGTERM, fermeture propre en cours...")
+        logging.info("Reçu SIGTERM, fermeture propre en cours...")
         cleanup_resources()
         sys.exit(0)
 
