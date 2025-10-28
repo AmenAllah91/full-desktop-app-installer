@@ -47,6 +47,7 @@ if exist "requirements.txt" (
 ) else (
     echo ⚠️ requirements.txt not found! Make sure dependencies are installed manually.
 )
+call deactivate
 
 :: Step: Generate .env
 if not exist ".env" (
