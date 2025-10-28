@@ -174,29 +174,28 @@ function createWindow(config) {
         }
     });
 
-    win.webContents.on('dom-ready', async () => {
-        await win.webContents.executeJavaScript(`
-            localStorage.setItem('realm', '${config.tenant}');
-            localStorage.setItem('GYM_BRANCH_ID', '${config.gymBranchId}');
-            localStorage.setItem('currentGymBranchId', '${config.gymBranchId}');
-            localStorage.setItem('TENANT', '${config.tenant}');
-            console.log('[INJECTION OK] sessionStorage now ready');
-        `);
+    win.webContents.session.clearCache();
+    win.loadURL('http://localhost:4200');
+
+    win.webContents.on('did-navigate', async (event, url) => {
+        if (url.startsWith('http://localhost:4200')) {
+            console.log('[ELECTRON] Injecting config into localStorage…');
+
+            await win.webContents.executeJavaScript(`
+                localStorage.setItem('realm', '${config.tenant}');
+                localStorage.setItem('GYM_BRANCH_ID', '${config.gymBranchId}');
+                localStorage.setItem('currentGymBranchId', '${config.gymBranchId}');
+                localStorage.setItem('TENANT', '${config.tenant}');
+                console.log('[INJECTION OK]');
+            `).catch(err => console.error('[INJECTION ERROR]', err));
+        }
     });
 
-    win.webContents.on('console-message', (event, level, message) => {
-        console.log(`[ELECTRON CONSOLE] ${message}`);
-    });
-
-    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><body></body></html>'));
-
-    setTimeout(() => {
-        win.loadURL('http://localhost:4200');
-        win.show();
-    }, 100);
+    win.once('ready-to-show', () => win.show());
 
     return win;
 }
+
 
 function launch(config) {
     spawnPythonProcess(config);
