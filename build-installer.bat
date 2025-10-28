@@ -49,32 +49,30 @@ if exist "requirements.txt" (
 )
 call deactivate
 
-:: Step: Generate .env
+:: Step: Generate .env directly
 if not exist ".env" (
-    if exist ".env.example" (
-        copy ".env.example" ".env"
-        echo .env file created from .env.example
+    echo Creating .env file...
 
-        :: Replace placeholders with real values
-        set KAFKA_BROKER=54.38.35.221:9094
-        set KAFKA_GROUP_ID=group_c
-        set KAFKA_TOPIC=rt_
-        set GYM_BRANCH_ID=1004
-        set TENANT=empire
+    (
+    echo KAFKA_BROKER=54.38.35.221:9094
+    echo KAFKA_GROUP_ID=group_c
+    echo KAFKA_TOPIC=rt_
+    echo GYM_BRANCH_ID=1004
+    echo TENANT=empire
+    echo.
+    echo FLASK_HOST=0.0.0.0
+    echo FLASK_PORT=9998
+    echo.
+    echo PLCOMPRO_URL=plcommpro.dll
+    ) > ".env"
 
-        powershell -Command "(Get-Content .env) -replace 'YOUR_KAFKA_BROKER:PORT','%KAFKA_BROKER%' | Set-Content .env"
-        powershell -Command "(Get-Content .env) -replace 'YOUR_GROUP_ID','%KAFKA_GROUP_ID%' | Set-Content .env"
-        powershell -Command "(Get-Content .env) -replace 'YOUR_TOPIC','%KAFKA_TOPIC%' | Set-Content .env"
-        powershell -Command "(Get-Content .env) -replace 'YOUR_BRANCH_ID','%GYM_BRANCH_ID%' | Set-Content .env"
-        powershell -Command "(Get-Content .env) -replace 'YOUR_TENANT','%TENANT%' | Set-Content .env"
-
-        echo .env populated with real values
-    ) else (
-        echo .env.example not found! Please create it manually.
-    )
+    echo .env file created successfully
 ) else (
     echo ℹ️ .env already exists, skipping creation
 )
+
+
+
 
 
 
