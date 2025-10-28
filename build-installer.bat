@@ -30,6 +30,53 @@ echo.
 :: Step 2: Build Python App
 echo 🐍 Building Python application...
 cd /d "%PYTHON_APP_DIR%"
+
+:: Create virtual environment if not exists
+if not exist "venv" (
+    python -m venv venv
+    echo ✅ Virtual environment created.
+)
+
+:: Activate venv
+call venv\Scripts\activate
+
+:: Install dependencies
+if exist "requirements.txt" (
+    echo 📦 Installing Python dependencies...
+    pip install -r requirements.txt
+) else (
+    echo ⚠️ requirements.txt not found! Make sure dependencies are installed manually.
+)
+
+:: Step: Generate .env
+if not exist ".env" (
+    if exist ".env.example" (
+        copy ".env.example" ".env"
+        echo .env file created from .env.example
+
+        :: Replace placeholders with real values
+        set KAFKA_BROKER=54.38.35.221:9094
+        set KAFKA_GROUP_ID=group_c
+        set KAFKA_TOPIC=rt_
+        set GYM_BRANCH_ID=1004
+        set TENANT=empire
+
+        powershell -Command "(Get-Content .env) -replace 'YOUR_KAFKA_BROKER:PORT','%KAFKA_BROKER%' | Set-Content .env"
+        powershell -Command "(Get-Content .env) -replace 'YOUR_GROUP_ID','%KAFKA_GROUP_ID%' | Set-Content .env"
+        powershell -Command "(Get-Content .env) -replace 'YOUR_TOPIC','%KAFKA_TOPIC%' | Set-Content .env"
+        powershell -Command "(Get-Content .env) -replace 'YOUR_BRANCH_ID','%GYM_BRANCH_ID%' | Set-Content .env"
+        powershell -Command "(Get-Content .env) -replace 'YOUR_TENANT','%TENANT%' | Set-Content .env"
+
+        echo .env populated with real values
+    ) else (
+        echo .env.example not found! Please create it manually.
+    )
+) else (
+    echo ℹ️ .env already exists, skipping creation
+)
+
+
+
 python -m PyInstaller --onefile --name=pythonApp main.py
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
