@@ -383,7 +383,7 @@ cd ..
 if exist "spring-boot-temp" rmdir /s /q "spring-boot-temp"
 if exist "spring-boot" rmdir /s /q "spring-boot"
 
-git clone -b feat/224/integration-desktop https://github.com/AmenAllah91/empire-gym-manager.git spring-boot-temp
+git clone -b integration-desktop-H2 https://github.com/AmenAllah91/empire-gym-manager.git spring-boot-temp
 if errorlevel 1 (
     echo Git clone failed!
     exit /b 1

@@ -1,12 +1,17 @@
 # Ignorer le dossier de build global
 /build-output/
 
+/spring-boot/
+/angular-dist/
+
 # Ignorer les dossiers spécifiques à electron-app
 /electron-app/dist/
+/electron-app/.idea/
 /electron-app/node_modules/
 
 # Ignorer les dossiers spécifiques à pythonApp
 /pythonApp/venv/
+/pythonApp/.env
 /pythonApp/.idea/
 
 # Autres fichiers/dossiers courants à ignorer

@@ -11,6 +11,8 @@ import sqlite3
 import subprocess
 import socket
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
 from pathlib import Path
 
 from domain import Operation
@@ -176,13 +178,34 @@ def start_angular():
     else:
         print("Angular frontend started")
 
+def encrypt_key(key: str, password: str) -> str:
+    iv = get_random_bytes(12)
+    cipher = AES.new(password.encode("utf-8"), AES.MODE_GCM, nonce=iv)
+    ciphertext, tag = cipher.encrypt_and_digest(key.encode("utf-8"))
+    encrypted_blob = iv + tag + ciphertext
+    return base64.b64encode(encrypted_blob).decode("utf-8")
+
 def start_spring():
     spring_jar = resource_path("gym-management-app-0.0.1-SNAPSHOT.jar", subfolder="spring-boot")
     if check_file(spring_jar, "Spring Boot JAR"):
+
+        h2_key = "eV03^a&T2W2E9r4xG0a^L&Yfc"
+        encryption_password = "yNFDmMUvrR9TypQ9kTqHOXwKFVROAKpj"
+
+        encrypted_key = encrypt_key(h2_key, encryption_password)
+
         subprocess.Popen(
-            ["java", "-jar", spring_jar, "--spring.profiles.active=desktop"],
+            [
+                "java",
+                f"-DGYM_KEY={encrypted_key}",
+                f"-DGYM_KEY_PASS={encryption_password}",
+                "-jar",
+                spring_jar,
+                "--spring.profiles.active=desktop"
+            ],
             creationflags=subprocess.CREATE_NO_WINDOW
         )
+
     if not wait_for_spring_boot(host="127.0.0.1", port=8081, timeout=300):
         print("Spring Boot n'a pas démarré correctement, vérifiez les logs")
     else:
