@@ -205,6 +205,10 @@ def start_spring():
             ],
             creationflags=subprocess.CREATE_NO_WINDOW
         )
+        os.environ.pop("GYM_KEY", None)
+        os.environ.pop("GYM_KEY_PASS", None)
+        encrypted_key = None
+        encryption_password = None
 
     if not wait_for_spring_boot(host="127.0.0.1", port=8081, timeout=300):
         print("Spring Boot n'a pas démarré correctement, vérifiez les logs")
