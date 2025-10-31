@@ -197,8 +197,8 @@ def start_spring():
         subprocess.Popen(
             [
                 "java",
-                f"-DGYM_KEY={encrypted_key}",
-                f"-DGYM_KEY_PASS={encryption_password}",
+                "-DGYM_KEY={encrypted_key}",
+                "-DGYM_KEY_PASS={encryption_password}",
                 "-jar",
                 spring_jar,
                 "--spring.profiles.active=desktop"
