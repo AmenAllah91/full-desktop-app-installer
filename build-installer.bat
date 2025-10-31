@@ -399,6 +399,9 @@ if errorlevel 1 (
 
 cd ..
 mkdir "spring-boot\" 2>nul
+cd spring-boot
+mkdir "data\" 2>nul
+cd ..
 xcopy /e /i /y "spring-boot-temp\target\gym-management-app-0.0.1-SNAPSHOT.jar" "spring-boot"
 if exist "spring-boot-temp" rmdir /s /q "spring-boot-temp"
 echo Jar build completed!
