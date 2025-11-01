@@ -1,7 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: =======================
 :: Configuration
+:: =======================
 set VERSION=1.0.0
 set APP_NAME=YoGym
 set OUTPUT_DIR=build-output
@@ -12,13 +14,13 @@ set RESOURCES_DIR=resources
 
 echo 🛠️  Starting automated build process for %APP_NAME% v%VERSION%
 echo.
-
-:: Debug information
 echo 📂 Current directory: %cd%
 echo 📂 Python directory: %cd%\%PYTHON_APP_DIR%
 echo.
 
+:: =======================
 :: Step 1: Clean old builds
+:: =======================
 echo 🔁 Cleaning old builds...
 if exist "%OUTPUT_DIR%" rmdir /s /q "%OUTPUT_DIR%"
 mkdir "%OUTPUT_DIR%" 2>nul
@@ -27,37 +29,77 @@ mkdir "%OUTPUT_DIR%\python" 2>nul
 mkdir "%OUTPUT_DIR%\setup" 2>nul
 echo.
 
+:: =======================
 :: Step 2: Build Python App
+:: =======================
 echo 🐍 Building Python application...
 cd /d "%PYTHON_APP_DIR%"
-python -m PyInstaller --onefile --name=pythonApp main.py
+
+:: Python du venv local (relatif au dossier pythonApp)
+set "PY=%cd%\venv\Scripts\python.exe"
+
+echo 📌 Python exe:
+"%PY%" -c "import sys; print(sys.executable)"
+if errorlevel 1 (
+  echo ❌ Python du venv introuvable: %cd%\venv\Scripts\python.exe
+  echo    Crée le venv ici:  python -m venv venv
+  echo    Puis:              venv\Scripts\pip install -U pip
+  exit /b 1
+)
+
+:: S'assurer que PyInstaller est présent dans CE venv
+"%PY%" -m pip show pyinstaller >nul 2>&1
+if errorlevel 1 (
+  echo 📦 Installing PyInstaller in this venv...
+  "%PY%" -m pip install --upgrade pip setuptools wheel
+  "%PY%" -m pip install pyinstaller
+  if errorlevel 1 (
+    echo ❌ Echec installation PyInstaller dans le venv
+    exit /b 1
+  )
+)
+
+:: Vérifier pyzkfp dans CE venv
+for /f "usebackq delims=" %%i in (`"%PY%" -c "import importlib.util; m=importlib.util.find_spec('pyzkfp'); print(m.origin if m else 'NONE')"`) do set PYZKFP_ORIGIN=%%i
+if /I "%PYZKFP_ORIGIN%"=="NONE" (
+  echo ❌ pyzkfp introuvable dans CE venv.
+  echo    Installe-le:  "%PY%" -m pip install pyzkfp
+  exit /b 2
+) else (
+  echo ✅ pyzkfp found at: %PYZKFP_ORIGIN%
+)
+
+:: Build depuis le SPEC (ne PAS passer --paths quand .spec est utilisé)
+"%PY%" -m PyInstaller --clean --log-level=DEBUG "pythonApp.exe.spec"
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
+    type "build\pythonApp\warn-pythonApp.txt" 2>nul
     exit /b 1
 )
 copy /y "dist\pythonApp.exe" "..\%OUTPUT_DIR%\python\"
 copy /y ".env" "..\%OUTPUT_DIR%\python\"
 copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
-del "pythonApp.spec"
 cd ..
 echo.
 
+:: =======================
 :: Step 3: Build setupDlls
+:: =======================
 echo ⚙️  Building SDK installer...
 if not exist "%SETUP_DLLS_DIR%" (
     echo ❌ Error: setupDlls directory not found!
     echo Current directory: %cd%
     echo Looking for setupDlls.py...
-    
+
     for /f "delims=" %%i in ('dir /b /s setupDlls.py 2^>nul') do (
         echo 🔍 Found setupDlls.py at: %%i
-        set SETUP_DLLS_PATH=%%~dpi
+        set "SETUP_DLLS_PATH=%%~dpi"
         cd /d "%%~dpi"
         echo Changed directory to: %%~dpi
         goto :build_setup_dlls
     )
-    
+
     echo ❌ setupDlls.py not found!
     exit /b 1
 ) else (
@@ -67,7 +109,7 @@ if not exist "%SETUP_DLLS_DIR%" (
 :build_setup_dlls
 echo 🔨 Building setupDlls.exe...
 if exist "setupDlls.py" (
-    python -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
+    "%PY%" -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
 ) else (
     echo ❌ setupDlls.py not found in %cd%!
     dir *.py /b
@@ -92,7 +134,9 @@ if exist "dist\setupDlls.exe" (
 cd ..
 echo.
 
+:: =======================
 :: Step 4: Build Electron App
+:: =======================
 echo 🎨 Building Electron application...
 if not exist "%ELECTRON_APP_DIR%" (
     echo ❌ Error: electron-app directory not found!
@@ -113,13 +157,11 @@ echo 🔍 Checking available npm scripts...
 call npm run --silent
 
 echo 🔨 Building Electron app...
-:: Check if build script exists
 call npm run build --dry-run >nul 2>&1
 if errorlevel 1 (
     echo ⚠️ No 'build' script found in package.json
     echo 🔍 Looking for alternative build commands...
-    
-    :: Try alternative build commands
+
     call npm run dist --dry-run >nul 2>&1
     if not errorlevel 1 (
         echo 🔨 Running 'npm run dist' instead...
@@ -142,11 +184,11 @@ if errorlevel 1 (
                 ) else (
                     echo ❌ No build script found! Available scripts:
                     call npm run
-                    
+
                     echo.
                     echo 📄 Contents of package.json:
                     type package.json
-                    
+
                     echo.
                     echo ⚠️ Proceeding without building Electron app...
                     mkdir "dist\win-unpacked" 2>nul
@@ -159,7 +201,6 @@ if errorlevel 1 (
     call npm run build
 )
 
-:: Look for build output in various potential locations
 if exist "dist\win-unpacked" (
     echo ✅ Found build output in dist\win-unpacked
     if not exist "..\%OUTPUT_DIR%\electron" mkdir "..\%OUTPUT_DIR%\electron" 2>nul
@@ -182,7 +223,7 @@ if exist "dist\win-unpacked" (
     dir dist /b 2>nul
     dir out /b 2>nul
     dir build /b 2>nul
-    
+
     echo.
     echo 📑 Creating placeholder Electron files...
     if not exist "..\%OUTPUT_DIR%\electron" mkdir "..\%OUTPUT_DIR%\electron" 2>nul
@@ -193,7 +234,9 @@ if exist "dist\win-unpacked" (
 cd ..
 echo.
 
+:: =======================
 :: Step 5: Copy SDK resources
+:: =======================
 echo 📦 Copying SDK resources...
 if not exist "%RESOURCES_DIR%" (
     echo ⚠️ Warning: resources directory not found!
@@ -219,7 +262,9 @@ if not exist "%RESOURCES_DIR%" (
 :resources_copied
 echo.
 
+:: =======================
 :: Step 6: Prepare Installer Files
+:: =======================
 echo 📦 Preparing installer files...
 if not exist "%OUTPUT_DIR%" (
     echo ❌ Output directory not found!
@@ -230,7 +275,6 @@ cd /d "%OUTPUT_DIR%"
 if exist "installer" rmdir /s /q "installer"
 mkdir "installer" 2>nul
 
-:: Copy electron files if they exist
 if exist "electron" (
     echo Copying Electron app files...
     xcopy /e /i /y "electron\*" "installer\"
@@ -240,7 +284,6 @@ if exist "electron" (
     echo This is a placeholder for the Electron app > "installer\%APP_NAME%.exe"
 )
 
-:: Copy Python executable if it exists
 if exist "python\pythonApp.exe" (
     echo Copying Python app...
     copy /y "python\pythonApp.exe" "installer\"
@@ -251,7 +294,6 @@ if exist "python\pythonApp.exe" (
     echo ⚠️ Warning: pythonApp.exe not found!
 )
 
-:: Copy setupDlls if it exists
 if exist "setup\setupDlls.exe" (
     echo Copying setupDlls...
     copy /y "setup\setupDlls.exe" "installer\"
@@ -259,7 +301,6 @@ if exist "setup\setupDlls.exe" (
     echo ⚠️ Warning: setupDlls.exe not found!
 )
 
-:: Copy resources if they exist
 mkdir "installer\resources" 2>nul
 if exist "resources" (
     echo Copying resources...
@@ -272,11 +313,11 @@ if exist "resources" (
     echo This is a placeholder for resources > "installer\resources\README.txt"
 )
 
-
-
 echo.
 
+:: =======================
 :: Step 7: Create NSIS Installer Script
+:: =======================
 echo 📝 Generating NSIS installer script...
 (
     echo ^^!include "MUI2.nsh"
@@ -298,18 +339,11 @@ echo 📝 Generating NSIS installer script...
     echo Section "Main Application"
     echo   SetOutPath "$INSTDIR"
     echo   SetOverwrite ifnewer
-    echo.
-    echo   ; Electron app files
     echo   File /r "*.*"
-    echo.
-    echo   ; Create logs directory
     echo   CreateDirectory "$INSTDIR\logs"
-    echo.
-    echo   ; Shortcuts
     echo   CreateDirectory "$SMPROGRAMS\%APP_NAME%"
     echo   CreateShortCut "$SMPROGRAMS\%APP_NAME%\%APP_NAME%.lnk" "$INSTDIR\%APP_NAME%.exe"
     echo   CreateShortCut "$DESKTOP\%APP_NAME%.lnk" "$INSTDIR\%APP_NAME%.exe"
-    echo.
     echo   WriteUninstaller "$INSTDIR\uninstall.exe"
     echo SectionEnd
     echo.
@@ -338,11 +372,12 @@ echo 📝 Generating NSIS installer script...
 ) > "installer\installer.nsi"
 echo.
 
-:: Step 8: Build Installer
+:: =======================
+:: Step 8: Build Installer (NSIS)
+:: =======================
 echo 🔨 Building NSIS installer...
 cd installer
 
-:: Find NSIS installation
 set NSIS_FOUND=0
 if exist "c:\Program Files (x86)\NSIS\makensis.exe" (
     set NSIS_EXE="c:\Program Files (x86)\NSIS\makensis.exe"
@@ -368,7 +403,7 @@ if %NSIS_FOUND%==1 (
         exit /b 1
     )
 ) else (
-    echo ❌ NSIS (makensis.exe) not found! 
+    echo ❌ NSIS (makensis.exe) not found!
     echo Please install NSIS from https://nsis.sourceforge.io/Download
     echo.
     echo To continue without NSIS, copying files to output directory...
@@ -387,7 +422,9 @@ if exist "%APP_NAME%Installer.exe" (
 cd ..
 echo.
 
+:: =======================
 :: Step 9: Final Output
+:: =======================
 echo 🎉 Installer created successfully!
 echo.
 echo 📦 Output Location:
@@ -401,3 +438,5 @@ echo - SetupDlls.exe for SDK setup
 echo - Desktop & Start menu shortcuts
 echo.
 echo 🚀 Run the installer to complete installation
+
+endlocal

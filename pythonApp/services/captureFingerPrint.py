@@ -1,9 +1,25 @@
 import base64
 import io
-
-from pyzkfp import ZKFP2
-import time
+import sys
 import os
+from pathlib import Path
+
+def _prepare_dll_search_path():
+    # Dossier d’extraction PyInstaller (onefile) OU dossier du script en dev
+    base_dir = getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent))
+    if hasattr(os, "add_dll_directory"):
+        try:
+            os.add_dll_directory(base_dir)
+        except Exception:
+            pass
+    os.environ["PATH"] = base_dir + os.pathsep + os.environ.get("PATH", "")
+
+_prepare_dll_search_path()
+
+# ⚠️ Importer pyzkfp APRES la préparation
+from pyzkfp import ZKFP2
+
+import time
 from PIL import Image
 import numpy as np
 
@@ -17,6 +33,7 @@ class FingerprintCapture:
     def initialize_device(self):
         """Initialize the fingerprint device"""
         try:
+            _prepare_dll_search_path()
             self.zk = ZKFP2()
             self.zk.Init()
 
