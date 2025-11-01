@@ -1,4 +1,4 @@
-# 🖥️ Desktop App — README détaillé
+# 🖥️ Desktop App YoGym
 
 ## 📂 Présentation du repo
 
