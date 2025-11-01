@@ -61,10 +61,10 @@ Il existe **deux branches principales** :
 
 2. **Lancer le builder**
    ```bash
-  build-installer.bat
+   build-installer.bat
    ```
 
-3. **Ce que fait le script en gros**
+4. **Ce que fait le script en gros**
    - Clone front (`integration-desktop`) et back (`integration-desktop-H2`)
    - Build backend :
      ```bash
@@ -79,7 +79,7 @@ Il existe **deux branches principales** :
    - installe les modules nécessaires pour `electron-app/`
    - Génére l’installateur final dans `build-output/`
 
-4. **Résultat**
+5. **Résultat**
    - Fichier installateur généré (`.exe`)  
 ---
 
