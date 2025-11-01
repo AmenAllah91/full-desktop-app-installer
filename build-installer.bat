@@ -533,6 +533,7 @@ if %NSIS_FOUND%==1 (
 if exist "%APP_NAME%Installer.exe" (
     move "%APP_NAME%Installer.exe" ..
 )
+
 cd ..
 echo.
 
