@@ -68,16 +68,12 @@ Il existe **deux branches principales** :
    - Clone front (`integration-desktop`) et back (`integration-desktop-H2`)
    - Build backend :
      ```bash
-     mvn clean package -DskipTests
+     mvn clean install
      ```
    - Build frontend :
      ```bash
      npm install
      ng build
-     ```
-   - Build backend :
-     ```bash
-     mvn clean install
      ```
    - installe les modules nécessaires et génere un .exe de `pythonApp/`
    - installe les modules nécessaires pour `electron-app/`
@@ -143,7 +139,7 @@ Il existe **deux branches principales** :
 ```bash
 git clone -b integration-desktop-H2 https://github.com/monorg/backend-repo.git backend
 cd backend
-mvn clean package -DskipTests
+mvn clean install
 ```
 
 **Frontend**
