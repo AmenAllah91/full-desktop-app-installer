@@ -2,7 +2,7 @@
 
 ## 📂 Présentation du repo
 
-Ce dépôt contient l’outil **builder** (`builder.bat`) et la logique permettant de générer une **application desktop installable**.
+Ce dépôt contient l’outil **builder** (`build-installer.bat`) et la logique permettant de générer une **application desktop installable**.
 
 Il existe **deux branches principales** :
 
