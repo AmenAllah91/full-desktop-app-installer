@@ -7,13 +7,13 @@ Ce dépôt contient l’outil **builder** (`build-installer.bat`) et la logique 
 Il existe **deux branches principales** :
 
 1. **`full-desktop-int`** — version **hors-ligne / tout en local**  
-   - Le `builder.bat` *clône* les repositories front-end et back-end, les build, déploie une base **H2 locale** et assemble l’application desktop complète.  
+   - Le ``build-installer.bat` *clône* les repositories front-end et back-end, les build, déploie une base **H2 locale** et assemble l’application desktop complète.  
    - Branches attendues dans les repos clônés :
      - backend : `integration-desktop-H2`
      - frontend : `integration-desktop`
 
 2. **`web-desktop-int`** — version **connectée / client web**  
-   - Le `builder.bat` **ne clône pas** les repos front/back.  
+   - Le ``build-installer.bat` **ne clône pas** les repos front/back.  
    - L’application desktop est un client qui **se connecte** à des services front/back déjà déployés sur un serveur via HTTPS.  
    - Le builder prépare uniquement l’UI desktop et la configuration du domaine distant.
 
