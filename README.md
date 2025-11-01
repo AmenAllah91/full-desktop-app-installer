@@ -88,12 +88,12 @@ Il existe **deux branches principales** :
 1. **Préparer l’environnement**
    - Node.js 18 et Python 3.9 installés
 
-3. **Lancer le builder**
+2. **Lancer le builder**
    ```bash
-  build-installer.bat web
+   build-installer.bat
    ```
 
-4. **Ce que fait le script**
+3. **Ce que fait le script**
    - génere un .exe de `pythonApp/`
    - installe les modules nécessaires pour `electron-app/`
    - Génére l’installateur final dans `build-output/`
