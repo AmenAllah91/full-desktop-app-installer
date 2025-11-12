@@ -7,7 +7,7 @@ import pywintypes
 from domain import AccessMachine
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
-from services.websocket import send_pointage
+from services.websocket import send_pointage, broadcast_ws
 
 
 # ------------------------------------------------------------------ #
@@ -38,7 +38,7 @@ class ZkemEvents:
         self.gym_branch_id = gym_branch_id
         # Ici tu peux créer le producer Kafka UNE SEULE FOIS pour l'instance
         from os import getenv
-        self.kafka = KafkaService(getenv("KAFKA_BROKER"), f"group_rt_{tenant}")
+        # self.kafka = KafkaService(getenv("KAFKA_BROKER"), f"group_rt_{tenant}")
 
     def OnAttTransactionEx(self, enroll, is_invalid,
                            state, verify,
@@ -57,9 +57,9 @@ class ZkemEvents:
             porte_type=self.m.porte_type or ""
         )
         print(payload)
-        self.kafka.produce("rt_" + self.tenant, payload)
+        # self.kafka.produce("rt_" + self.tenant, payload)
         try:
-            broadcast_ws(json.loads(payload))  # convertit string JSON → dict
+            send_pointage(json.loads(payload), "1003")  # convertit string JSON → dict
         except Exception as ex:
             print(f"[WebSocket] Erreur envoi WS: {ex}")
 

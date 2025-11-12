@@ -75,7 +75,8 @@ class ZkemAdapter(DeviceAdapter):
         self.zk.EnableDevice(self.mn, False)
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
-        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "",0, True)
+            # TODO apres vérification on doit changer la valeur 2 par 0
+        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "",2, True)
         if not ok:
             logging.error("SSR_SetUserInfo KO (pin=%s)", pin)
             self.zk.EnableDevice(self.mn, True)
