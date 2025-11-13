@@ -95,9 +95,9 @@ currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant =os.getenv("TENANT")
 # Kafka service configuration
 # el kafka service service bech nal9aw fiha el connection m3a el server eli fyha kafka "broker" w nal9aw methods kima el produce w el consume
-pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
-publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
-fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
+# pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
+# publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
+# fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
 
 machineService = AccessMachineService()
 
@@ -439,22 +439,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def consume_pointage_client():
-    while not stop_event_kafka.is_set():
-        try:
-            pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
-        except Exception as e:
-            print(f"Error in pointage client consumption loop: {e}")
-            time.sleep(1)
+# def consume_pointage_client():
+#     while not stop_event_kafka.is_set():
+#         try:
+#             pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
+#         except Exception as e:
+#             print(f"Error in pointage client consumption loop: {e}")
+#             time.sleep(1)
 
 
-def consume_fingerprint_client():
-    while not stop_event_kafka.is_set():
-        try:
-            fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
-        except Exception as e:
-            print(f"Error in fingerprint actions consumption loop: {e}")
-            time.sleep(1)
+# def consume_fingerprint_client():
+#     while not stop_event_kafka.is_set():
+#         try:
+#             fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
+#         except Exception as e:
+#             print(f"Error in fingerprint actions consumption loop: {e}")
+#             time.sleep(1)
 
 
 @app.route('/getFace/<int:user_pin>/<int:gym_branch_id>/<int:machine_id>', methods=['GET'])
@@ -485,27 +485,27 @@ def curentconf():
         logging.error(f" Error in capture_fingerprint_api: {e}")
         return jsonify({"error": str(e)}), 500
 
-def consume_publish_photo():
-    def handle_photo_publish(message):
-        try:
-            data = json.loads(message)
-            gym_branch_id = data.get("gymBranchId")
-            user_pin = str(data.get("userPin"))
-            machine_id = data.get("machineId")
-            ip = data.get("addresseip")
-            port = data.get("port")
-
-            process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
-
-        except Exception as e:
-            logging.error(f" Error processing launch_publish_photo message: {e}")
-
-    while not stop_event_kafka.is_set():
-        try:
-            publish_photo_kafka.consume(topic=TOPIC_CONSUME_PUBLISH_PHOTO, on_message=handle_photo_publish)
-        except Exception as e:
-            logging.error("Error in publish photo consumption loop: %s", e)
-            time.sleep(3)
+# def consume_publish_photo():
+#     def handle_photo_publish(message):
+#         try:
+#             data = json.loads(message)
+#             gym_branch_id = data.get("gymBranchId")
+#             user_pin = str(data.get("userPin"))
+#             machine_id = data.get("machineId")
+#             ip = data.get("addresseip")
+#             port = data.get("port")
+#
+#             process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
+#
+#         except Exception as e:
+#             logging.error(f" Error processing launch_publish_photo message: {e}")
+#
+#     while not stop_event_kafka.is_set():
+#         try:
+#             publish_photo_kafka.consume(topic=TOPIC_CONSUME_PUBLISH_PHOTO, on_message=handle_photo_publish)
+#         except Exception as e:
+#             logging.error("Error in publish photo consumption loop: %s", e)
+#             time.sleep(3)
 
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
     if gym_branch_id != currentGymBranchId:
@@ -529,7 +529,7 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
                 "userPin": user_pin,
                 "photo": encoded
             }
-            publish_photo_kafka.produce(TOPIC_PRODUCE_PUBLISH_PHOTO, json.dumps(payload))
+            # publish_photo_kafka.produce(TOPIC_PRODUCE_PUBLISH_PHOTO, json.dumps(payload))
             logging.info(f"✅ Published photo for user {user_pin} to Kafka.")
             return payload
         else:
@@ -537,16 +537,16 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
             return None
 
 # Start separate Kafka consumer threads
-def start_kafka_consumers():
-    pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
-    photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
-    fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
-                                                  name="FingerprintActionsThread")
-
-    pointage_thread.start()
-    photo_publish_thread.start()
-    fingerprint_actions_thread.start()
-    print("Kafka consumer threads started")
+# def start_kafka_consumers():
+#     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
+#     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
+#     fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
+#                                                   name="FingerprintActionsThread")
+#
+#     pointage_thread.start()
+#     photo_publish_thread.start()
+#     fingerprint_actions_thread.start()
+#     print("Kafka consumer threads started")
 
 
 def cleanup_resources(driver=None):
@@ -682,7 +682,7 @@ def upload_fingerprint():
                 "results": results
             }), 500
         elif success_count < total_count:
-            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
+            # fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
             return jsonify({
                 "warning": f"Partial success: {success_count}/{total_count} machines",
                 "results": results,
@@ -690,7 +690,7 @@ def upload_fingerprint():
                 "fingerprint_template": encoded_template
             }), 207
         else:
-            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
+            # fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
             return jsonify({
                 "message": f"Fingerprint uploaded successfully to all {total_count} machines",
                 "results": results,
@@ -850,7 +850,7 @@ if __name__ == '__main__':
                                  name=f"RT-ZK-{m.addresseip}").start()
 
         # Kafka consumers
-        start_kafka_consumers()
+        # start_kafka_consumers()
 
         # Flask (inchangé)
         free_port(FLASK_PORT)
