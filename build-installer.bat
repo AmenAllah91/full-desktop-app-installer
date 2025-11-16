@@ -35,51 +35,61 @@ echo.
 echo 🐍 Building Python application...
 cd /d "%PYTHON_APP_DIR%"
 
-:: Python du venv local (relatif au dossier pythonApp)
-set "PY=%cd%\venv\Scripts\python.exe"
-
-echo 📌 Python exe:
-"%PY%" -c "import sys; print(sys.executable)"
-if errorlevel 1 (
-  echo ❌ Python du venv introuvable: %cd%\venv\Scripts\python.exe
-  echo    Crée le venv ici:  python -m venv venv
-  echo    Puis:              venv\Scripts\pip install -U pip
-  exit /b 1
+:: Create virtual environment if not exists
+if not exist "venv" (
+    python -m venv venv
+    echo ✅ Virtual environment created.
 )
 
-:: S'assurer que PyInstaller est présent dans CE venv
-"%PY%" -m pip show pyinstaller >nul 2>&1
-if errorlevel 1 (
-  echo 📦 Installing PyInstaller in this venv...
-  "%PY%" -m pip install --upgrade pip setuptools wheel
-  "%PY%" -m pip install pyinstaller
-  if errorlevel 1 (
-    echo ❌ Echec installation PyInstaller dans le venv
-    exit /b 1
-  )
-)
+:: Activate venv
+call venv\Scripts\activate
 
-:: Vérifier pyzkfp dans CE venv
-for /f "usebackq delims=" %%i in (`"%PY%" -c "import importlib.util; m=importlib.util.find_spec('pyzkfp'); print(m.origin if m else 'NONE')"`) do set PYZKFP_ORIGIN=%%i
-if /I "%PYZKFP_ORIGIN%"=="NONE" (
-  echo ❌ pyzkfp introuvable dans CE venv.
-  echo    Installe-le:  "%PY%" -m pip install pyzkfp
-  exit /b 2
+:: Install dependencies
+if exist "requirements.txt" (
+    echo 📦 Installing Python dependencies...
+    pip install -r requirements.txt
 ) else (
-  echo ✅ pyzkfp found at: %PYZKFP_ORIGIN%
+    echo ⚠️ requirements.txt not found! Make sure dependencies are installed manually.
+)
+call deactivate
+
+:: Step: Generate .env directly
+if not exist ".env" (
+    echo Creating .env file...
+
+    (
+    echo KAFKA_BROKER=54.38.35.221:9094
+    echo KAFKA_GROUP_ID=group_c
+    echo KAFKA_TOPIC=rt_
+    echo GYM_BRANCH_ID=1004
+    echo TENANT=empire
+    echo.
+    echo FLASK_HOST=0.0.0.0
+    echo FLASK_PORT=9998
+    echo.
+    echo PLCOMPRO_URL=plcommpro.dll
+    ) > ".env"
+
+    echo .env file created successfully
+) else (
+    echo ℹ️ .env already exists, skipping creation
 )
 
-:: Build depuis le SPEC (ne PAS passer --paths quand .spec est utilisé)
-"%PY%" -m PyInstaller --clean --log-level=DEBUG "pythonApp.exe.spec"
+
+
+
+
+
+python -m PyInstaller --onefile --name=pythonApp main.py --hidden-import=Crypto --hidden-import=Crypto.Cipher --hidden-import=Crypto.Hash --hidden-import=Crypto.Random --hidden-import=Crypto.Util
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
-    type "build\pythonApp\warn-pythonApp.txt" 2>nul
     exit /b 1
 )
 copy /y "dist\pythonApp.exe" "..\%OUTPUT_DIR%\python\"
 copy /y ".env" "..\%OUTPUT_DIR%\python\"
 copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
+del "pythonApp.spec"
 cd ..
 echo.
 
@@ -94,7 +104,7 @@ if not exist "%SETUP_DLLS_DIR%" (
 
     for /f "delims=" %%i in ('dir /b /s setupDlls.py 2^>nul') do (
         echo 🔍 Found setupDlls.py at: %%i
-        set "SETUP_DLLS_PATH=%%~dpi"
+        set SETUP_DLLS_PATH=%%~dpi
         cd /d "%%~dpi"
         echo Changed directory to: %%~dpi
         goto :build_setup_dlls
@@ -109,7 +119,7 @@ if not exist "%SETUP_DLLS_DIR%" (
 :build_setup_dlls
 echo 🔨 Building setupDlls.exe...
 if exist "setupDlls.py" (
-    "%PY%" -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
+    python -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
 ) else (
     echo ❌ setupDlls.py not found in %cd%!
     dir *.py /b
