@@ -257,6 +257,7 @@ def process_device_queue() -> None:
                 with ctx.lock:
                     if op == "ADD_USER":
                         ok = adapter.add_user(pin,
+                                              task["user_name"],
                                               task["card_no"],
                                               task["start_date"],
                                               task["end_date"])
