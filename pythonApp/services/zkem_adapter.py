@@ -145,6 +145,17 @@ class ZkemAdapter(DeviceAdapter):
 
         return bool(success)
 
+    def resource_path(self,relative_path: str, subfolder: str = None) -> str:
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            base_dir = os.path.dirname(base_dir)
+        if subfolder:
+            base_dir = os.path.join(base_dir, subfolder)
+
+        return os.path.join(base_dir, relative_path)
+
     @_ensure_conn
     def download_user_photo(self, pin: str, path: str) -> bool:
         """
@@ -155,10 +166,7 @@ class ZkemAdapter(DeviceAdapter):
         :param path:     chemin complet où copier la photo finale (…\\<pin>.jpg)
         :return:         True si OK, False sinon
         """
-        if hasattr(sys, '_MEIPASS'):
-            base_path = Path(sys._MEIPASS) / "getuserfacephoto"
-        else:
-            base_path = Path(__file__).resolve().parents[1] / "getuserfacephoto"
+        base_path = Path(self.resource_path("", subfolder="getuserfacephoto"))
         exe_path= base_path / "ConsoleApp1.exe"
 
         if not exe_path.exists():

@@ -311,6 +311,13 @@ if exist "setup\setupDlls.exe" (
     echo ⚠️ Warning: setupDlls.exe not found!
 )
 
+    if exist "..\pythonApp\getuserfacephoto" (
+        echo Copying getuserfacephoto folder...
+        mkdir "installer\getuserfacephoto" 2>nul
+        copy /y "..\pythonApp\getuserfacephoto\*" "installer\getuserfacephoto\"
+    ) else (
+        echo  getuserfacephoto folder not found!
+    )
 mkdir "installer\resources" 2>nul
 if exist "resources" (
     echo Copying resources...
