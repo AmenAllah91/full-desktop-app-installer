@@ -3,6 +3,8 @@ import os
 import signal
 import sys
 import threading
+from datetime import datetime
+
 import psutil
 import logging
 import time
@@ -22,14 +24,15 @@ from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine
+from services.MachineMonitor import monitor_machine, make_rt_json, kafka
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 from queue import Queue
 from dotenv import load_dotenv, set_key
 
-from services.websocket import start_ws_server
+from services.websocket import start_ws_server, send_pointage
+from services.zkem_adapter import ZkemAdapter
 
 class SPARequestHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -75,34 +78,23 @@ PLCOMPRO_URL=plcommpro.dll
         print(f"Created default .env file at: {ENV_FILE_PATH}")
 
 
-# Get paths for data files
 APP_DATA_DIR = get_app_data_dir()
 ENV_FILE_PATH = os.path.join(APP_DATA_DIR, '.env')
 DB_FILE = os.path.join(APP_DATA_DIR, 'task_queue.db')
 TEMP_DIR = os.path.join(APP_DATA_DIR, 'temp')
 
-# Create temp directory for photos
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Load environment variables from AppData
 load_dotenv(dotenv_path=ENV_FILE_PATH)
 initialize_env_file()
 
 KafkaBroker = os.getenv("KAFKA_BROKER")
 
-# Flask application initialization
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant =os.getenv("TENANT")
-# Kafka service configuration
-# el kafka service service bech nal9aw fiha el connection m3a el server eli fyha kafka "broker" w nal9aw methods kima el produce w el consume
-# pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
-# publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
-# fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
 
 machineService = AccessMachineService()
 
-# Global variables and synchronization primitives
-# device handel 7tinaha global bech nconictiw mara barka m3a el machine
 device_handle = None
 handle_lock = threading.RLock()
 stop_event_monitoring = threading.Event()
@@ -439,22 +431,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-# def consume_pointage_client():
-#     while not stop_event_kafka.is_set():
-#         try:
-#             pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
-#         except Exception as e:
-#             print(f"Error in pointage client consumption loop: {e}")
-#             time.sleep(1)
-
-
-# def consume_fingerprint_client():
-#     while not stop_event_kafka.is_set():
-#         try:
-#             fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
-#         except Exception as e:
-#             print(f"Error in fingerprint actions consumption loop: {e}")
-#             time.sleep(1)
 
 
 @app.route('/getFace/<int:user_pin>/<int:gym_branch_id>/<int:machine_id>', methods=['GET'])
@@ -485,27 +461,6 @@ def curentconf():
         logging.error(f" Error in capture_fingerprint_api: {e}")
         return jsonify({"error": str(e)}), 500
 
-# def consume_publish_photo():
-#     def handle_photo_publish(message):
-#         try:
-#             data = json.loads(message)
-#             gym_branch_id = data.get("gymBranchId")
-#             user_pin = str(data.get("userPin"))
-#             machine_id = data.get("machineId")
-#             ip = data.get("addresseip")
-#             port = data.get("port")
-#
-#             process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
-#
-#         except Exception as e:
-#             logging.error(f" Error processing launch_publish_photo message: {e}")
-#
-#     while not stop_event_kafka.is_set():
-#         try:
-#             publish_photo_kafka.consume(topic=TOPIC_CONSUME_PUBLISH_PHOTO, on_message=handle_photo_publish)
-#         except Exception as e:
-#             logging.error("Error in publish photo consumption loop: %s", e)
-#             time.sleep(3)
 
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
     if gym_branch_id != currentGymBranchId:
@@ -529,24 +484,12 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
                 "userPin": user_pin,
                 "photo": encoded
             }
-            # publish_photo_kafka.produce(TOPIC_PRODUCE_PUBLISH_PHOTO, json.dumps(payload))
             logging.info(f"✅ Published photo for user {user_pin} to Kafka.")
             return payload
         else:
             logging.error(f"❌ Failed to download photo for user {user_pin}.")
             return None
 
-# Start separate Kafka consumer threads
-# def start_kafka_consumers():
-#     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
-#     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
-#     fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
-#                                                   name="FingerprintActionsThread")
-#
-#     pointage_thread.start()
-#     photo_publish_thread.start()
-#     fingerprint_actions_thread.start()
-#     print("Kafka consumer threads started")
 
 
 def cleanup_resources(driver=None):
@@ -682,7 +625,6 @@ def upload_fingerprint():
                 "results": results
             }), 500
         elif success_count < total_count:
-            # fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
             return jsonify({
                 "warning": f"Partial success: {success_count}/{total_count} machines",
                 "results": results,
@@ -690,7 +632,6 @@ def upload_fingerprint():
                 "fingerprint_template": encoded_template
             }), 207
         else:
-            # fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
             return jsonify({
                 "message": f"Fingerprint uploaded successfully to all {total_count} machines",
                 "results": results,
@@ -760,6 +701,89 @@ def enqueue_access_tasks():
 
     return jsonify({"status": "queued", "tasksQueued": queued}), 201
 
+REQUIRED_OPEN = {"gymBranchId", "machineId"}
+
+@app.route('/door/open', methods=['POST'])
+def open_door_api():
+    try:
+        data = request.get_json(force=True) or {}
+
+        # --- champs obligatoires ---
+        if not REQUIRED_OPEN.issubset(data):
+            missing = REQUIRED_OPEN - data.keys()
+            abort(400, f"Champs manquants : {', '.join(missing)}")
+
+        gym_branch_id = str(data["gymBranchId"])
+        machine_id = data["machineId"]
+
+        # --- champs optionnels / défauts ---
+        duration = int(data.get("duration", 5))
+        door_no = int(data.get("door", 1))   # pour C3 : 1..4
+
+        # 👇 nouveau : pin & porte_type optionnels
+        pin = data.get("pin")                # string ou int
+        porte_type = data.get("porte_type", "ENTREE")
+
+        ctx = DeviceManager.get(machine_id)
+        if not ctx:
+            abort(404, f"Machine {machine_id} inconnue dans DeviceManager")
+
+        adapter = ctx.adapter
+
+        with ctx.lock:
+            if isinstance(adapter, PlcommAdapter):
+                ok = adapter.open_door(door_no=door_no, duration=duration)
+            elif isinstance(adapter, ZkemAdapter):
+                ok = adapter.open_door(duration_seconds=duration)
+            else:
+                abort(400, f"Type d'adapter non supporté : {type(adapter).__name__}")
+
+        # --- SI pas de PIN → on s’arrête là ---
+        if not pin:
+            return jsonify({
+                "status": "OK" if ok else "ERROR",
+                "machineId": machine_id,
+                "duration": duration
+            }), 200 if ok else 500
+
+        # --- SINON : on crée un pointage comme si l’adhérent avait pointé ---
+        try:
+            now = datetime.now()
+            dt_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            # code event "ouverture distante" (choisis ce que tu veux)
+            state_code = 0
+
+            payload_json = make_rt_json(
+                machine_id=ctx.machine.id,
+                ip=ctx.machine.addresseip,
+                mtype=ctx.machine.type,
+                pin=int(pin),
+                state_code=state_code,
+                dt=dt_str,
+                door_id=door_no,
+                card_no=None,
+                gym_branch_id=gym_branch_id,
+                porte_type=porte_type,
+            )
+
+            payload = json.loads(payload_json)
+            kafka.produce("rt_" + tenant, payload)
+
+            send_pointage(payload, gym_branch_id)
+
+        except Exception as ex:
+            logging.exception("Erreur lors de l'envoi du pointage manuel : %s", ex)
+
+        return jsonify({
+            "status": "OK" if ok else "ERROR",
+            "machineId": machine_id,
+            "duration": duration
+        }), 200 if ok else 500
+
+    except Exception as ex:
+        logging.exception("Erreur /door/open : %s", ex)
+        return jsonify({"status": "ERROR", "message": str(ex)}), 500
 # ---------------------------------------------------------------------------
 # 2) main  — initialisation complète de l’application
 # ---------------------------------------------------------------------------
@@ -849,10 +873,7 @@ if __name__ == '__main__':
                                  daemon=True,
                                  name=f"RT-ZK-{m.addresseip}").start()
 
-        # Kafka consumers
-        # start_kafka_consumers()
 
-        # Flask (inchangé)
         free_port(FLASK_PORT)
         threading.Thread(target=lambda: app.run(
             debug=False, host=FLASK_HOST, port=FLASK_PORT),

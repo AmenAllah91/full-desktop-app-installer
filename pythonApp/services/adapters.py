@@ -75,7 +75,16 @@ plcommpro.GetDeviceData.argtypes = [
     c_char_p
 ]
 plcommpro.GetDeviceData.restype = c_int
-
+plcommpro.ControlDevice.argtypes = [
+    c_void_p,   # handle (pointeur retourné par Connect)
+    c_int,      # OperationID
+    c_int,      # Param1
+    c_int,      # Param2
+    c_int,      # Param3
+    c_int,      # Param4
+    c_char_p    # Options
+]
+plcommpro.ControlDevice.restype = c_int
 
 class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
     def __init__(self, machine):
@@ -541,3 +550,61 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
 
     def download_user_photo(self, pin: str, path: str) -> bool:
         return self;
+
+    def open_door(self, door_no: int, duration: int = 5, event_type: int = 0) -> bool:
+        """
+        Ouvre une porte sur un contrôleur C3/inBio via ControlDevice.
+
+        :param door_no: numéro de la porte (1..4)
+        :param duration: durée en secondes (1..60)
+        :param event_type: type d'événement dans les logs (0 = auto par status)
+        """
+        if not self.handle:
+            # normal pour les C3 : le handle est en général fixé par DeviceContext,
+            # mais si jamais ce n'est pas le cas, on tente une connexion directe.
+            self.connect()
+
+        if not self.handle:
+            logging.error("❌ open_door: aucun handle disponible pour %s", self.machine.addresseip)
+            return False
+
+        # bornage de la durée
+        duration = max(1, min(int(duration), 60))
+
+        operation_id = 1      # 1 = output
+        param1 = int(door_no) # index de sortie / porte
+        param2 = 1            # 1 = door output
+        param3 = duration     # durée en secondes
+        param4 = int(event_type)  # 0 = auto selon status
+        options = b""         # pas d'options
+
+        try:
+            ret = plcommpro.ControlDevice(
+                self.handle,
+                operation_id,
+                param1,
+                param2,
+                param3,
+                param4,
+                options
+            )
+            if ret < 0:
+                logging.error(
+                    "❌ ControlDevice KO (%s door=%s, duration=%s) ret=%s",
+                    self.machine.addresseip, door_no, duration, ret
+                )
+                return False
+
+            logging.info(
+                "✅ Porte %s ouverte pendant %s s sur %s",
+                door_no, duration, self.machine.addresseip
+            )
+            return True
+
+        except OSError as exc:
+            logging.error(
+                "❌ Exception ControlDevice pour %s : %s",
+                self.machine.addresseip, exc
+            )
+            self.disconnect()
+            return False
