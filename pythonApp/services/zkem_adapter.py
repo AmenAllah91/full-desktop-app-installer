@@ -85,7 +85,7 @@ class ZkemAdapter(DeviceAdapter):
         try:
             s = datetime.strptime(start_time, "%Y%m%d").strftime("%Y-%m-%d 00:00:00")
             e = datetime.strptime(end_time, "%Y%m%d").strftime("%Y-%m-%d 23:59:59")
-            ok = self.zk.SetUserValidDate(self.mn, int(pin), True, 1, s, e)
+            ok = self.zk.SetUserValidDate(self.mn, int(pin), 1, 1, s, e)
             if not ok:
                 logging.error("SetUserValidDate KO (pin=%s)", pin)
         except Exception as ex:
@@ -358,6 +358,29 @@ class ZkemAdapter(DeviceAdapter):
                 self.zk.EnableDevice(self.mn, True)
             except Exception:
                 pass
+
+    @_ensure_conn
+    def open_door(self, duration_seconds: float = 5.0) -> bool:
+        """
+        Ouvre la porte (relais) du terminal standalone.
+
+        :param duration_seconds: durée d'ouverture en secondes
+        """
+        try:
+            delay = int(max(1, duration_seconds) * 10)  # doc : Delay/10 = secondes
+            ok = self.zk.ACUnlock(self.mn, delay)
+            if not ok:
+                from MonitorZkem import zkem_last_error  # si besoin
+                err = zkem_last_error(self.zk)
+                logging.error("❌ ACUnlock KO %s err=%s", self.ip, err)
+                return False
+
+            logging.info("✅ Porte ouverte sur standalone %s pendant %ss", self.ip, duration_seconds)
+            return True
+
+        except Exception as exc:
+            logging.exception("❌ Exception ACUnlock sur %s : %s", self.ip, exc)
+            return False
 
 def zkem_last_error(zk) -> Union[int, str]:
     """

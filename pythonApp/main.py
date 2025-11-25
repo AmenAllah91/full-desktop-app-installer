@@ -3,6 +3,8 @@ import os
 import signal
 import sys
 import threading
+from datetime import datetime
+
 import psutil
 import logging
 import time
@@ -16,14 +18,15 @@ from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine
+from services.MachineMonitor import monitor_machine, make_rt_json, kafka
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 from queue import Queue
 from dotenv import load_dotenv, set_key
 
-from services.websocket import start_ws_server
+from services.websocket import start_ws_server, send_pointage
+from services.zkem_adapter import ZkemAdapter
 
 
 def get_app_data_dir():
@@ -685,7 +688,89 @@ def enqueue_access_tasks():
 
     return jsonify({"status": "queued", "tasksQueued": queued}), 201
 
+REQUIRED_OPEN = {"gymBranchId", "machineId"}
 
+@app.route('/door/open', methods=['POST'])
+def open_door_api():
+    try:
+        data = request.get_json(force=True) or {}
+
+        # --- champs obligatoires ---
+        if not REQUIRED_OPEN.issubset(data):
+            missing = REQUIRED_OPEN - data.keys()
+            abort(400, f"Champs manquants : {', '.join(missing)}")
+
+        gym_branch_id = str(data["gymBranchId"])
+        machine_id = data["machineId"]
+
+        # --- champs optionnels / défauts ---
+        duration = int(data.get("duration", 5))
+        door_no = int(data.get("door", 1))   # pour C3 : 1..4
+
+        # 👇 nouveau : pin & porte_type optionnels
+        pin = data.get("pin")                # string ou int
+        porte_type = data.get("porte_type", "ENTREE")
+
+        ctx = DeviceManager.get(machine_id)
+        if not ctx:
+            abort(404, f"Machine {machine_id} inconnue dans DeviceManager")
+
+        adapter = ctx.adapter
+
+        with ctx.lock:
+            if isinstance(adapter, PlcommAdapter):
+                ok = adapter.open_door(door_no=door_no, duration=duration)
+            elif isinstance(adapter, ZkemAdapter):
+                ok = adapter.open_door(duration_seconds=duration)
+            else:
+                abort(400, f"Type d'adapter non supporté : {type(adapter).__name__}")
+
+        # --- SI pas de PIN → on s’arrête là ---
+        if not pin:
+            return jsonify({
+                "status": "OK" if ok else "ERROR",
+                "machineId": machine_id,
+                "duration": duration
+            }), 200 if ok else 500
+
+        # --- SINON : on crée un pointage comme si l’adhérent avait pointé ---
+        try:
+            now = datetime.now()
+            dt_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            # code event "ouverture distante" (choisis ce que tu veux)
+            state_code = 0
+
+            payload_json = make_rt_json(
+                machine_id=ctx.machine.id,
+                ip=ctx.machine.addresseip,
+                mtype=ctx.machine.type,
+                pin=int(pin),
+                state_code=state_code,
+                dt=dt_str,
+                door_id=door_no,
+                card_no=None,
+                gym_branch_id=gym_branch_id,
+                porte_type=porte_type,
+            )
+
+            payload = json.loads(payload_json)
+            kafka.produce("rt_" + tenant, payload)
+
+            send_pointage(payload, gym_branch_id)
+
+        except Exception as ex:
+            logging.exception("Erreur lors de l'envoi du pointage manuel : %s", ex)
+
+        return jsonify({
+            "status": "OK" if ok else "ERROR",
+            "machineId": machine_id,
+            "duration": duration
+        }), 200 if ok else 500
+
+    except Exception as ex:
+        logging.exception("Erreur /door/open : %s", ex)
+        return jsonify({"status": "ERROR", "message": str(ex)}), 500
 # ---------------------------------------------------------------------------
 # 2) main  — initialisation complète de l’application
 # ---------------------------------------------------------------------------
