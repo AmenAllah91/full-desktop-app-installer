@@ -191,7 +191,7 @@ function createWindow(config) {
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><body></body></html>'));
 
     setTimeout(() => {
-        win.loadURL('https://integration.yogym.co');
+        win.loadURL('http://localhost:4200');
         win.show();
     }, 100);
 
