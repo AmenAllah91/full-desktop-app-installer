@@ -42,6 +42,13 @@ class DeviceAdapter(ABC):
     @abstractmethod
     def add_fingerprint(self,pin, fingerprint_template: bytes, finger_id: int, save_to_kafka: bool = True) -> bool: ...
 
+    @abstractmethod
+    def get_fingerprints(self, pin: str) -> list[dict]:
+        """
+        Retourne les templates d'empreintes pour un PIN donné.
+        Format attendu: [{ "fingerId": int, "template": str, ... }, ...]
+        """
+        ...
 
 # -------------------------------------------------------- PLComm adapter
 if platform.system() != "Windows":
@@ -334,17 +341,11 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
     def check_duplicate_fingerprint(self, new_template_base64):
         """
         Check if the fingerprint template already exists for any user.
-
-        Args:
-            new_template_base64: Base64 encoded fingerprint template
-
-        Returns:
-            dict: {'is_duplicate': bool, 'existing_user': str, 'finger_id': int}
+        Compatible CSV + KV formats returned by PullSDK.
         """
         buffer_size = 10 * 1024 * 1024
         buffer = ctypes.create_string_buffer(buffer_size)
 
-        # Get ALL fingerprint templates from device
         result = plcommpro.GetDeviceData(
             self.handle, buffer, buffer_size,
             b"templatev10", b"*", b"", b""
@@ -354,31 +355,20 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
             logging.info("No existing templates found or error reading templates")
             return {'is_duplicate': False, 'existing_user': None, 'finger_id': None}
 
-        # Parse the response
         templates_data = buffer.value.decode('utf-8', errors='ignore')
+        rows = self._parse_templatev10_rows(templates_data)  # ✅ support CSV + KV
 
-        for line in templates_data.split('\n'):
-            if not line.strip():
-                continue
+        for r in rows:
+            existing_template = (r.get("Template") or "").strip()
+            existing_pin = (r.get("Pin") or "").strip()
+            existing_fid = r.get("FingerID", "unknown")
 
-            # Parse template entry
-            fields = {}
-            for field in line.split('\t'):
-                if '=' in field:
-                    key, value = field.split('=', 1)
-                    fields[key] = value
-
-            if 'Template' in fields and 'Pin' in fields:
-                existing_template = fields['Template']
-
-                # Compare templates (basic string comparison)
-                # For more robust comparison, use biometric matching algorithms
-                if existing_template == new_template_base64:
-                    return {
-                        'is_duplicate': True,
-                        'existing_user': fields['Pin'],
-                        'finger_id': fields.get('FingerID', 'unknown')
-                    }
+            if existing_template and existing_template == new_template_base64:
+                return {
+                    'is_duplicate': True,
+                    'existing_user': existing_pin,
+                    'finger_id': existing_fid
+                }
 
         return {'is_duplicate': False, 'existing_user': None, 'finger_id': None}
 
@@ -452,7 +442,7 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
 
             # Delete the fingerprint - format: "Field=Value" pairs separated by \t
             # Based on doc: data = "Pin=2" for conditions of deleting the data
-            delete_filter = f"Pin={user_id}\tFingerID={finger_id}\tValid=1\tResverd=\tEndTag=".encode('utf-8')
+            delete_filter = f"Pin={user_id}\tFingerID={finger_id}".encode('utf-8')
             logging.info(f"Delete filter: Pin={user_id}\\tFingerID={finger_id}")
 
             result = plcommpro.DeleteDeviceData(
@@ -550,6 +540,122 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
 
     def download_user_photo(self, pin: str, path: str) -> bool:
         return self;
+
+    def _parse_templatev10_rows(self, raw: str) -> list[dict]:
+        """
+        PullSDK peut renvoyer:
+          - CSV: header + lignes 'Size,UID,Pin,FingerID,Valid,Template,...'
+          - KV:  'Pin=...\tFingerID=...\tTemplate=...'
+        On supporte les 2.
+        """
+        if not raw:
+            return []
+
+        lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        lines = [l.strip() for l in lines if l.strip()]
+        if not lines:
+            return []
+
+        out = []
+
+        # --- Détection CSV (présence de virgules + header)
+        first = lines[0]
+        looks_csv = ("," in first) and ("=" not in first)
+
+        if looks_csv:
+            # header probable
+            header = [h.strip() for h in first.split(",")]
+            start_idx = 1
+
+            # si le "header" est en fait déjà une ligne data (ex: commence par un nombre)
+            # on fallback sur un header connu
+            if header and header[0].isdigit():
+                header = ["Size", "UID", "Pin", "FingerID", "Valid", "Template", "Resverd", "EndTag"]
+                start_idx = 0
+
+            for line in lines[start_idx:]:
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 6:
+                    continue
+                row = dict(zip(header, parts))
+                out.append(row)
+            return out
+
+        # --- Sinon KV
+        for line in lines:
+            fields = {}
+            for part in line.split("\t"):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    fields[k.strip()] = v.strip()
+            if fields:
+                out.append(fields)
+
+        return out
+
+    def get_fingerprints(self, pin: str) -> list[dict]:
+        """
+        C3 / inBio via PullSDK: lit templatev10 (sans filtre, plus stable),
+        puis filtre côté Python.
+        """
+        if not self.handle:
+            self.connect()
+        if not self.handle:
+            raise RuntimeError("❌ PullSDK: impossible de se connecter (handle nul).")
+
+        buffer_size = 10 * 1024 * 1024
+        buffer = ctypes.create_string_buffer(buffer_size)
+
+        # ⚠️ on évite le filter 'Pin=...' qui peut retourner -101 selon firmware
+        ret = plcommpro.GetDeviceData(
+            self.handle,
+            buffer,
+            buffer_size,
+            b"templatev10",
+            b"*",
+            b"",
+            b""
+        )
+
+        if ret <= 0:
+            return []
+
+        raw = buffer.value.decode("utf-8", errors="ignore")
+        rows = self._parse_templatev10_rows(raw)
+
+        pin_str = str(pin).strip()
+        res = []
+
+        for r in rows:
+            # CSV: keys 'Pin','FingerID','Template' | KV idem
+            if str(r.get("Pin", "")).strip() != pin_str:
+                continue
+
+            tpl = (r.get("Template") or "").strip()
+            if not tpl:
+                continue
+
+            try:
+                fid = int(str(r.get("FingerID")).strip())
+            except Exception:
+                continue
+
+            size_val = r.get("Size")
+            try:
+                size_int = int(size_val) if size_val is not None and str(size_val).strip().isdigit() else None
+            except Exception:
+                size_int = None
+
+            res.append({
+                "fingerId": fid,
+                "template": tpl,
+                "size": size_int,
+                "valid": r.get("Valid"),
+                "source": "PULLSDK"
+            })
+
+        res.sort(key=lambda x: x["fingerId"])
+        return res
 
     def open_door(self, door_no: int, duration: int = 5, event_type: int = 0) -> bool:
         """

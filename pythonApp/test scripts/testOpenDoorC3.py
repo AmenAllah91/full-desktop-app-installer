@@ -1,95 +1,104 @@
-import ctypes
-from ctypes import c_char_p, c_int, c_long, create_string_buffer
+"""
+ZKTeco ADMS - Ajouter un utilisateur sur SpeedFace-V3L
+SN: TDBD252200898
 
-class PullSDKController:
-    def __init__(self, dll_path="plcommpro.dll"):
-        # Charge la DLL PullSDK
-        self.dll = ctypes.WinDLL(dll_path)
-        self.handle = None
+1. Lancer: python add_user.py
+2. L'appareil se connecte et reçoit la commande
+3. L'utilisateur est ajouté
+"""
 
-        # Définition des signatures de fonctions utilisées
-        self.dll.Connect.argtypes = [c_char_p]
-        self.dll.Connect.restype = ctypes.c_void_p
+from flask import Flask, request, Response
+import hashlib, time
 
-        self.dll.Disconnect.argtypes = [ctypes.c_void_p]
-        self.dll.Disconnect.restype = None
+app = Flask(__name__)
 
-        self.dll.ControlDevice.argtypes = [
-            ctypes.c_void_p,  # handle
-            c_long,           # OperationID
-            c_long,           # Param1
-            c_long,           # Param2
-            c_long,           # Param3
-            c_long,           # Param4
-            c_char_p          # Options
-        ]
-        self.dll.ControlDevice.restype = c_int
+# === LA COMMANDE À ENVOYER ===
+# Modifie ici le user à ajouter
+USER_PIN = "1"
+USER_NAME = "Ahmed"
+COMMAND_SENT = False
 
-        # Pour récupérer le code d’erreur si besoin
-        self.dll.PullLastError.restype = c_int
 
-    def connect(self, ip, port=4370, timeout=4000, password=""):
-        params = (
-            f"protocol=TCP,ipaddress={ip},port={port},"
-            f"timeout={timeout},passwd={password}"
+@app.route("/iclock/cdata", methods=["GET", "POST"])
+def cdata():
+    sn = request.args.get("SN", "?")
+    if request.method == "GET":
+        print(f"\n✅ Appareil connecté: {sn}")
+        session = hashlib.md5(f"{sn}{time.time()}".encode()).hexdigest().upper()
+        config = (
+            f"GET OPTION FROM: {sn}\r\n"
+            f"Stamp=0\r\nOpStamp=0\r\nPhotoStamp=0\r\n"
+            f"ErrorDelay=60\r\nDelay=2\r\nRequestDelay=2\r\n"
+            f"TransInterval=1\r\nTransFlag=1111000000\r\n"
+            f"Realtime=1\r\nEncrypt=0\r\n"
+            f"ServerVer=3.4.1\r\nPushProtVer=3.1.2\r\n"
+            f"SessionID={session}\r\nTimeoutSec=30"
         )
-        buf = params.encode("ascii")
-        self.handle = self.dll.Connect(buf)
-
-        if not self.handle:
-            err = self.dll.PullLastError()
-            raise RuntimeError(f"Connexion échouée à {ip}, code d’erreur PullSDK = {err}")
-
-    def open_door(self, door_no=1, open_seconds=5):
-        """
-        Ouvre la porte door_no pendant open_seconds (1–60s).
-        Pour un tourniquet tripode :
-          - door_no = 1 → 'entrée'
-          - door_no = 2 → 'sortie'
-        …selon ton câblage.
-        """
-        if not self.handle:
-            raise RuntimeError("Non connecté au contrôleur")
-
-        if open_seconds <= 0:
-            open_seconds = 1
-        if open_seconds > 60:
-            open_seconds = 60
-
-        operation_id = 1   # Output operation
-        param1 = door_no   # Door number
-        param2 = 1         # 1 = door output
-        param3 = open_seconds  # durée en secondes
-        param4 = 0
-        options = b""
-
-        ret = self.dll.ControlDevice(
-            self.handle,
-            operation_id,
-            param1,
-            param2,
-            param3,
-            param4,
-            options
-        )
-
-        if ret < 0:
-            raise RuntimeError(f"ControlDevice a échoué, code = {ret}")
-
-    def disconnect(self):
-        if self.handle:
-            self.dll.Disconnect(self.handle)
-            self.handle = None
+        return Response(config, status=200, content_type="text/plain")
+    else:
+        table = request.args.get("table", "")
+        body = request.data.decode("utf-8", errors="replace")
+        print(f"📦 POST cdata table={table}: {body[:200]}")
+        return Response("OK", status=200, content_type="text/plain")
 
 
-# Exemple d’utilisation :
+@app.route("/iclock/registry", methods=["GET", "POST"])
+def registry():
+    sn = request.args.get("SN", "?")
+    body = request.data.decode("utf-8", errors="replace")
+    print(f"📡 Registry: SN={sn}")
+    if body:
+        print(f"   {body[:300]}")
+    return Response(f"RegistryCode=\t{sn}", status=200, content_type="text/plain")
+
+
+@app.route("/iclock/getrequest", methods=["GET"])
+def getrequest():
+    global COMMAND_SENT
+    sn = request.args.get("SN", "?")
+
+    if not COMMAND_SENT:
+        COMMAND_SENT = True
+        cmd = f"C:1:DATA UPDATE user\tPin={USER_PIN}\tName={USER_NAME}\tPri=0\tPasswd=\tCardNo=\tGrp=1\tTZ=0000000100000000\tVerify=-1\tViceCard="
+        print(f"\n🚀 ENVOI COMMANDE: Ajout user Pin={USER_PIN} Name={USER_NAME}")
+        print(f"   CMD: {cmd}")
+        return Response(cmd, status=200, content_type="text/plain")
+
+    return Response("OK", status=200, content_type="text/plain")
+
+
+@app.route("/iclock/devicecmd", methods=["POST"])
+def devicecmd():
+    sn = request.args.get("SN", "?")
+    body = request.data.decode("utf-8", errors="replace")
+    print(f"\n📨 RÉSULTAT COMMANDE: {body}")
+    if "Return=0" in body:
+        print("✅ SUCCÈS! L'utilisateur a été ajouté!")
+    else:
+        print("❌ ÉCHEC de la commande")
+    return Response("OK", status=200, content_type="text/plain")
+
+
+@app.route("/iclock/querydata", methods=["POST"])
+def querydata():
+    body = request.data.decode("utf-8", errors="replace")
+    print(f"📊 QueryData: {body[:300]}")
+    return Response("OK", status=200, content_type="text/plain")
+
+
+@app.route("/iclock/fdata", methods=["POST"])
+def fdata():
+    return Response("OK", status=200, content_type="text/plain")
+
+
+@app.route("/iclock/push", methods=["POST"])
+def push():
+    return Response("OK", status=200, content_type="text/plain")
+
+
 if __name__ == "__main__":
-    ip = "192.168.1.205"   # IP de ton InBio
-    ctrl = PullSDKController()
-
-    ctrl.connect(ip)
-    # Entrée = porte 1, 5 secondes
-    ctrl.open_door(door_no=1, open_seconds=5)
-    # Sortie = porte 2, 5 secondes (si câblée ainsi)
-    # ctrl.open_door(door_no=2, open_seconds=5)
-    ctrl.disconnect()
+    print("=" * 50)
+    print(f"  Ajout user: Pin={USER_PIN} Name={USER_NAME}")
+    print(f"  En attente de l'appareil sur port 8088...")
+    print("=" * 50)
+    app.run(host="0.0.0.0", port=8088, debug=False)

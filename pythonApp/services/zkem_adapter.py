@@ -1,3 +1,4 @@
+
 # adapters/zkem_adapter.py
 import base64
 import logging
@@ -37,22 +38,26 @@ class ZkemAdapter(DeviceAdapter):
     # ------------------------------------------------------------
 
     def connect(self, max_attempts: int = 3) -> bool:
-        if self.connected:                  # déjà OK
-            return True
-
         for n in range(1, max_attempts + 1):
-            if self.zk.Connect_Net(self.ip, self.port):
-                self.connected = True
-                logging.info("✅ ZKEM connecté %s", self.ip)
-                return True
+            try:
+                if self.zk.Connect_Net(self.ip, self.port):
+                    self.connected = True
+                    logging.info("✅ ZKEM connecté %s", self.ip)
+                    return True
+            except Exception as e:
+                logging.warning("⚠️ Connect_Net exception %s:%s : %s", self.ip, self.port, e)
 
-            # échec : on récupère le code d'erreur puis on attend
+            self.connected = False
+            try:
+                self.zk.Disconnect()
+            except Exception:
+                pass
+
             err_code = zkem_last_error(self.zk)
             logging.warning("ZKEM retry %s/%s (%s:%s) err=%s",
                             n, max_attempts, self.ip, self.port, err_code)
-            time.sleep(0.0001)
+            time.sleep(0.5)
 
-        # toutes les tentatives échouent
         return False
 
     def disconnect(self):
@@ -78,7 +83,13 @@ class ZkemAdapter(DeviceAdapter):
             # user privileges 0 : user normal , 1 : admin , 2 : superadmin
         ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "",2, True)
         if not ok:
-            logging.error("SSR_SetUserInfo KO (pin=%s)", pin)
+            logging.error("SSR_SetUserInfo KO (pin=%s) err=%s",
+                          pin, zkem_last_error(self.zk))
+            self.connected = False
+            try:
+                self.zk.Disconnect()
+            except Exception:
+                pass
             self.zk.EnableDevice(self.mn, True)
             return False
 
@@ -219,6 +230,95 @@ class ZkemAdapter(DeviceAdapter):
         except Exception as ex:
             logging.exception("⚠️ Exception download_face : %s", ex)
             return False
+
+    def _extract_template_from_com_result(self, res):
+        """
+        res peut être:
+        - bool
+        - tuple: (success, template, length) ou (success, flag, template, length) ...
+        On extrait la string template de façon robuste.
+        """
+        if res is None:
+            return None
+
+        if isinstance(res, tuple) and len(res) >= 2:
+            success = bool(res[0])
+            if not success:
+                return None
+
+            # le template est généralement le seul "str" du tuple
+            for item in res[1:]:
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+            return None
+
+        # si jamais le COM renvoie juste True/False
+        if isinstance(res, bool):
+            return None
+
+        return None
+
+    def _read_template_str(self, user_id: str, finger_id: int):
+        """
+        Tente SSR_GetUserTmpStr puis GetUserTmpExStr avec plusieurs signatures possibles.
+        Retourne template base64 ou None.
+        """
+        # 1) SSR_GetUserTmpStr (souvent dispo)
+        if hasattr(self.zk, "SSR_GetUserTmpStr"):
+            m = getattr(self.zk, "SSR_GetUserTmpStr")
+            variants = [
+                (int(self.mn), str(user_id), int(finger_id)),
+                (int(self.mn), str(user_id), int(finger_id), "", 0),
+            ]
+            for args in variants:
+                try:
+                    res = m(*args)
+                    tpl = self._extract_template_from_com_result(res)
+                    if tpl:
+                        return tpl
+                except TypeError:
+                    continue
+                except Exception as e:
+                    logging.debug(f"SSR_GetUserTmpStr fail args={args}: {e}")
+
+        # 2) GetUserTmpExStr (souvent dispo si SetUserTmpExStr existe)
+        if hasattr(self.zk, "GetUserTmpExStr"):
+            m = getattr(self.zk, "GetUserTmpExStr")
+            variants = [
+                (int(self.mn), int(user_id), int(finger_id)),
+                (int(self.mn), int(user_id), int(finger_id), 0, "", 0),
+            ]
+            for args in variants:
+                try:
+                    res = m(*args)
+                    tpl = self._extract_template_from_com_result(res)
+                    if tpl:
+                        return tpl
+                except TypeError:
+                    continue
+                except Exception as e:
+                    logging.debug(f"GetUserTmpExStr fail args={args}: {e}")
+
+        return None
+
+    @_ensure_conn
+    def get_fingerprints(self, pin: str) -> list[dict]:
+        """
+        Standalone SDK : on teste FingerID 0..9.
+        """
+        pin_str = str(pin)
+        out = []
+
+        for fid in range(0, 10):
+            tpl = self._read_template_str(pin_str, fid)
+            if tpl:
+                out.append({
+                    "fingerId": fid,
+                    "template": tpl,     # base64 (compatible avec SetUserTmpExStr)
+                    "source": "STANDALONE"
+                })
+
+        return out
 
     @_ensure_conn
     def delete_user(self, pin, finger_id=None) -> bool:
@@ -395,3 +495,4 @@ def zkem_last_error(zk) -> Union[int, str]:
             return err.value
         except Exception:
             return "?"
+
