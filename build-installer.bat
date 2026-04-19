@@ -58,7 +58,7 @@ if not exist ".env" (
     echo Creating .env file...
 
     (
-    echo KAFKA_BROKER=54.38.35.221:9094
+    echo KAFKA_BROKER=51.178.55.238:9094
     echo KAFKA_GROUP_ID=group_c
     echo KAFKA_TOPIC=rt_
     echo GYM_BRANCH_ID=1004

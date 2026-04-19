@@ -7,7 +7,7 @@ from domain import AccessMachine
 
 class AccessMachineService:
     def __init__(self, base_url=None, timeout=5):
-        self.base_url = base_url or os.getenv("API_BASE_URL", "https://integration.yogym.co/gym-management/public")
+        self.base_url = base_url or os.getenv("API_BASE_URL", "https://app.yogym.co/gym-management/public")
         self.session = requests.Session()
         self.timeout = timeout
 
