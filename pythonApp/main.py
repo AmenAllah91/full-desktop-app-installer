@@ -33,6 +33,13 @@ from services.adms_adapter import ADMSAdapter
 from services.adms_server import ADMSServer
 from services.MonitorADMS import monitor_adms
 
+# v2 imports
+from services.v2.startup import start_v2
+from services.v2.device_manager_v2 import DeviceManagerV2
+
+# Version globale — "v1" (legacy multi-protocole) ou "v2" (full PUSH/ADMS)
+app_version = "v1"
+
 def get_app_data_dir():
     print("[INFO] Trying to get APPDATA environment variable...")
     app_data = os.environ.get('APPDATA')
@@ -259,6 +266,22 @@ def delete_completedTasks():
     conn.close()
 
 
+def get_device_context(machine_id):
+    """Retourne le DeviceContext pour une machine, v1 ou v2."""
+    if app_version == "v2":
+        return DeviceManagerV2.get(machine_id)
+    else:
+        return DeviceManager.get(machine_id)
+
+
+def get_all_device_contexts():
+    """Retourne tous les DeviceContext, v1 ou v2."""
+    if app_version == "v2":
+        return DeviceManagerV2.all()
+    else:
+        return list(DeviceManager._registry.values())
+
+
 def free_port(port, retries=3):
     """Find and kill any process using the specified port."""
     current_pid = os.getpid()  # ← on s'exclut
@@ -316,6 +339,12 @@ def process_device_queue() -> None:
                 pin = task["user_pin"]
             except Exception as exc:
                 logging.error("Tâche #%s invalide : %s", task_id, exc)
+                mark_task_as_completed(task_id)
+                continue
+
+            if ctx is None:
+                logging.warning("⚠️ Tâche #%s : machine %s non enregistrée, tâche ignorée",
+                                task_id, task.get("machineId"))
                 mark_task_as_completed(task_id)
                 continue
 
@@ -521,7 +550,7 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
     if gym_branch_id != currentGymBranchId:
         return None
 
-    ctx = DeviceManager._registry.get(machine_id)
+    ctx = get_device_context(machine_id)
     if not ctx:
         logging.error(f"No context found for machine ID {machine_id}")
         return None
@@ -595,8 +624,8 @@ def upload_face_multipart():
     MAX_UPLOAD_RETRIES = 3
     RETRY_DELAY = 1
 
-    for ctx in DeviceManager._registry.values():
-        if str(ctx.gymBranchId) != str(currentGymBranchId):
+    for ctx in get_all_device_contexts():
+        if str(ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId) != str(currentGymBranchId):
             continue
 
         adapter = ctx.adapter
@@ -647,8 +676,10 @@ def upload_fingerprint():
         success_count = 0
         total_count = 0
 
-        for machine_id, ctx in DeviceManager._registry.items():
-            if str(ctx.gymBranchId) != str(currentGymBranchId):
+        for ctx in get_all_device_contexts():
+            machine_id = ctx.machine.id
+            branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+            if str(branch_id) != str(currentGymBranchId):
                 continue
 
             total_count += 1
@@ -713,6 +744,198 @@ def get_gym_branch_id():
 
 
 from flask import request, abort
+
+
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    """Retourne la version en cours (v1 ou v2)."""
+    return jsonify({"version": app_version}), 200
+
+
+@app.route('/api/test/add_user', methods=['POST'])
+def test_add_user():
+    """
+    Endpoint de test — ajoute un utilisateur directement sur une machine.
+    Utile pour tester sans passer par Kafka ou Angular.
+
+    Body JSON :
+    {
+        "machineId": 2044,
+        "pin": "99999",
+        "name": "Test User",
+        "cardNo": "",
+        "startDate": "20250101",
+        "endDate": "20261231"
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        machine_id = data.get("machineId")
+        pin = str(data.get("pin", ""))
+        name = data.get("name", "Test")
+        card_no = data.get("cardNo", "")
+        start_date = data.get("startDate", "")
+        end_date = data.get("endDate", "")
+
+        if not machine_id or not pin:
+            return jsonify({"error": "machineId et pin sont requis"}), 400
+
+        ctx = get_device_context(machine_id)
+        if not ctx:
+            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
+
+        adapter = ctx.adapter
+
+        # Vérifier connexion
+        connected = adapter.is_connected() if hasattr(adapter, 'is_connected') else getattr(adapter, 'connected', False)
+        if not connected:
+            return jsonify({
+                "error": "Machine non connectée",
+                "machine": ctx.machine.alias,
+                "ip": ctx.machine.addresseip,
+                "hint": "Vérifiez que la machine est en mode PUSH et pointe vers ce serveur sur le port 8088"
+            }), 503
+
+        # Tester add_user
+        ok = adapter.add_user(pin, name, card_no, start_date, end_date)
+
+        result = {
+            "operation": "ADD_USER",
+            "success": ok,
+            "machine": ctx.machine.alias,
+            "ip": ctx.machine.addresseip,
+            "pin": pin,
+            "name": name,
+        }
+
+        if ok:
+            # Aussi tester authorize
+            ok_auth = adapter.authorize_user(pin)
+            result["authorize_success"] = ok_auth
+
+        return jsonify(result), 200 if ok else 500
+
+    except Exception as ex:
+        logging.exception("Erreur test add_user: %s", ex)
+        return jsonify({"error": str(ex)}), 500
+
+
+@app.route('/api/test/delete_user', methods=['POST'])
+def test_delete_user():
+    """
+    Endpoint de test — supprime un utilisateur.
+    Body JSON : { "machineId": 2044, "pin": "99999" }
+    """
+    try:
+        data = request.get_json(force=True)
+        machine_id = data.get("machineId")
+        pin = str(data.get("pin", ""))
+
+        ctx = get_device_context(machine_id)
+        if not ctx:
+            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
+
+        adapter = ctx.adapter
+        ok = adapter.delete_user(pin)
+        return jsonify({"operation": "DELETE_USER", "success": ok, "pin": pin}), 200 if ok else 500
+
+    except Exception as ex:
+        return jsonify({"error": str(ex)}), 500
+
+
+@app.route('/api/test/open_door', methods=['POST'])
+def test_open_door():
+    """
+    Endpoint de test — ouvre une porte.
+    Body JSON : { "machineId": 2044, "duration": 5 }
+    """
+    try:
+        data = request.get_json(force=True)
+        machine_id = data.get("machineId")
+        duration = int(data.get("duration", 5))
+
+        ctx = get_device_context(machine_id)
+        if not ctx:
+            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
+
+        adapter = ctx.adapter
+
+        if app_version == "v2":
+            ok = adapter.open_door(door_no=1, duration=duration)
+        elif hasattr(adapter, 'open_door'):
+            ok = adapter.open_door(duration_seconds=duration) if hasattr(adapter, 'ACUnlock') else adapter.open_door(door_no=1, duration=duration)
+        else:
+            ok = False
+
+        return jsonify({"operation": "OPEN_DOOR", "success": ok, "duration": duration}), 200 if ok else 500
+
+    except Exception as ex:
+        return jsonify({"error": str(ex)}), 500
+
+
+@app.route('/api/test/queue', methods=['GET'])
+def test_queue_status():
+    """Endpoint de test — affiche l'état de la queue et des commandes en attente."""
+    try:
+        # Commandes en attente dans la SQLite queue
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, task_data, status, created_at FROM task_queue ORDER BY created_at DESC LIMIT 20")
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                "id": row[0],
+                "task": json.loads(row[1]) if row[1] else None,
+                "status": row[2],
+                "created_at": row[3]
+            })
+        conn.close()
+
+        # Commandes ADMS en attente dans les adapters
+        adapter_queues = {}
+        for ctx in get_all_device_contexts():
+            adapter = ctx.adapter
+            queue_len = len(getattr(adapter, '_command_queue', []))
+            adapter_queues[ctx.machine.alias] = {
+                "machine_id": ctx.machine.id,
+                "connected": adapter.is_connected() if hasattr(adapter, 'is_connected') else None,
+                "sn": getattr(adapter, 'sn', None),
+                "commands_pending": queue_len,
+            }
+
+        return jsonify({
+            "version": app_version,
+            "sqlite_tasks": tasks,
+            "adapter_queues": adapter_queues
+        }), 200
+
+    except Exception as ex:
+        return jsonify({"error": str(ex)}), 500
+
+
+@app.route('/api/devices', methods=['GET'])
+def get_devices():
+    """Retourne l'état de toutes les machines connectées."""
+    devices = []
+    for ctx in get_all_device_contexts():
+        adapter = ctx.adapter
+        info = {
+            "id": ctx.machine.id,
+            "alias": ctx.machine.alias,
+            "ip": ctx.machine.addresseip,
+            "port": ctx.machine.port,
+            "original_type": ctx.machine.type,
+            "mode": "PUSH/ADMS" if app_version == "v2" else ctx.machine.type,
+        }
+        if app_version == "v2":
+            info["connected"] = adapter.is_connected()
+            info["sn"] = adapter.sn
+            info["last_seen"] = adapter.last_seen.isoformat() if adapter.last_seen else None
+        else:
+            info["connected"] = getattr(adapter, "connected", None)
+        devices.append(info)
+    return jsonify({"version": app_version, "devices": devices}), 200
+
 
 REQUIRED_TOP = {
     "gymBranchId", "operation",
@@ -781,14 +1004,16 @@ def open_door_api():
         pin = data.get("pin")
         porte_type = data.get("porte_type", "ENTREE")
 
-        ctx = DeviceManager.get(machine_id)
+        ctx = get_device_context(machine_id)
         if not ctx:
             abort(404, f"Machine {machine_id} inconnue dans DeviceManager")
 
         adapter = ctx.adapter
 
         with ctx.lock:
-            if isinstance(adapter, PlcommAdapter):
+            if app_version == "v2":
+                ok = adapter.open_door(door_no=door_no, duration=duration)
+            elif isinstance(adapter, PlcommAdapter):
                 ok = adapter.open_door(door_no=door_no, duration=duration)
             elif isinstance(adapter, ZkemAdapter):
                 ok = adapter.open_door(duration_seconds=duration)
@@ -846,14 +1071,17 @@ def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
         if int(gym_branch_id) != int(currentGymBranchId):
             return jsonify({"error": "Machine non valide pour cette gymBranchId"}), 400
 
-        ctx = DeviceManager._registry.get(machine_id)
+        ctx = get_device_context(machine_id)
         if not ctx:
             try:
                 ms = AccessMachineService()
                 machines = ms.get_access_machines(str(gym_branch_id), str(tenant))
                 for m in machines:
-                    DeviceManager.register(m, tenant, gym_branch_id)
-                ctx = DeviceManager._registry.get(machine_id)
+                    if app_version == "v2":
+                        DeviceManagerV2.register(m, tenant, gym_branch_id)
+                    else:
+                        DeviceManager.register(m, tenant, gym_branch_id)
+                ctx = get_device_context(machine_id)
             except Exception as e:
                 logging.error(f"❌ fallback register machines failed: {e}")
 
@@ -902,7 +1130,10 @@ def soft_restart():
         stop_event_monitoring.clear()
 
         # 3 — Vider le DeviceManager
-        DeviceManager._registry.clear()
+        if app_version == "v2":
+            DeviceManagerV2.clear()
+        else:
+            DeviceManager._registry.clear()
 
         # 4 — Recharger les machines
         try:
@@ -910,6 +1141,18 @@ def soft_restart():
             logging.info("🔌 Machines rechargées : %s", machines)
         except Exception as e:
             logging.error("❌ Erreur rechargement machines : %s", e)
+            return
+
+        if app_version == "v2":
+            # v2 restart : réenregistrer toutes les machines en PUSH
+            from services.v2.adms_server_v2 import ADMSServerV2
+            adms_srv = ADMSServerV2()
+            for m in machines:
+                ctx = DeviceManagerV2.register(m, tenant, gym_branch_id)
+                adms_srv.register_adapter(ctx.adapter)
+            from services.v2.monitor_v2 import setup_attendance_callback
+            setup_attendance_callback(adms_srv, tenant, gym_branch_id)
+            logging.info("✅ Soft restart v2 terminé")
             return
 
         for m in machines:
@@ -963,10 +1206,25 @@ if __name__ == '__main__':
         tenant = sys.argv[1]
         gym_branch_id = sys.argv[2]
     else:
-        print("Expected arguments: TENANT GYM_BRANCH_ID", file=sys.stderr)
+        print("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]", file=sys.stderr)
         sys.exit(1)
 
-    print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}")
+    # Parse --version argument
+    if "--version" in sys.argv:
+        idx = sys.argv.index("--version")
+        if idx + 1 < len(sys.argv):
+            app_version = sys.argv[idx + 1].lower()
+        else:
+            print("--version requires a value (v1 or v2)", file=sys.stderr)
+            sys.exit(1)
+    else:
+        app_version = "v1"
+
+    if app_version not in ("v1", "v2"):
+        print(f"Version invalide: {app_version}. Attendu: v1 ou v2", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}    version : {app_version}")
     currentGymBranchId = gym_branch_id
 
     try:
@@ -976,70 +1234,81 @@ if __name__ == '__main__':
 
         machines = machineService.get_access_machines(gym_branch_id, tenant)
         print("machines dispo   :", machines)
-        for m in machines:
-            DeviceManager.register(m, tenant, gym_branch_id)
 
-        initialize_task_queue_db()
-        threading.Thread(target=process_device_queue,
-                         daemon=True,
-                         name="DeviceQueueThread").start()
+        if app_version == "v2":
+            # ── v2 : Full PUSH/ADMS ──────────────────────────────────
+            start_v2(
+                machines=machines,
+                tenant=tenant,
+                gym_branch_id=gym_branch_id,
+                stop_event=stop_event_monitoring,
+                task_queue_functions={
+                    "initialize_db": initialize_task_queue_db,
+                    "add_task": add_task_to_queue,
+                    "get_next": get_next_task_from_queue,
+                    "mark_completed": mark_task_as_completed,
+                }
+            )
+        else:
+            # ── v1 : Legacy multi-protocole (C3 / STANDALONE / PUSH) ──
+            for m in machines:
+                DeviceManager.register(m, tenant, gym_branch_id)
 
-        # ── Watchdog + démarrage des threads monitors ──────────────────
-        global watchdog
-        watchdog = MachineWatchdog()
-        adms_server = None
-        has_push = any(m.type == "PUSH" for m in machines)
-        if has_push:
-            adms_server = ADMSServer(port=8088)
-            adms_server.start()
-            logging.info("🚀 Serveur ADMS démarré (port 8088)")
-        for m in machines:
-            ctx = DeviceManager.register(m, tenant, gym_branch_id)
+            initialize_task_queue_db()
+            threading.Thread(target=process_device_queue,
+                             daemon=True,
+                             name="DeviceQueueThread").start()
 
-            if m.type == "C3":
-                def make_c3(ctx=ctx):
-                    return threading.Thread(
-                        target=monitor_machine,
-                        args=(ctx, stop_event_monitoring),
-                        daemon=True,
-                        name=f"RT-C3-{ctx.machine.addresseip}"
-                    )
+            global watchdog
+            watchdog = MachineWatchdog()
+            adms_server = None
+            has_push = any(m.type == "PUSH" for m in machines)
+            if has_push:
+                adms_server = ADMSServer(port=8088)
+                adms_server.start()
+                logging.info("🚀 Serveur ADMS démarré (port 8088)")
+            for m in machines:
+                ctx = DeviceManager.register(m, tenant, gym_branch_id)
 
+                if m.type == "C3":
+                    def make_c3(ctx=ctx):
+                        return threading.Thread(
+                            target=monitor_machine,
+                            args=(ctx, stop_event_monitoring),
+                            daemon=True,
+                            name=f"RT-C3-{ctx.machine.addresseip}"
+                        )
 
-                watchdog.register(m.id, make_c3)
+                    watchdog.register(m.id, make_c3)
 
-            elif m.type == "PUSH":
-                # Enregistrer l'adapter ADMS auprès du serveur
-                adapter = ctx.adapter
-                if adms_server:
-                    adms_server.register_adapter(adapter)
+                elif m.type == "PUSH":
+                    adapter = ctx.adapter
+                    if adms_server:
+                        adms_server.register_adapter(adapter)
 
+                    def make_push(m=m, adapter=adapter):
+                        return threading.Thread(
+                            target=monitor_adms,
+                            args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
+                            daemon=True,
+                            name=f"RT-PUSH-{m.addresseip}"
+                        )
 
-                def make_push(m=m, adapter=adapter):
-                    return threading.Thread(
-                        target=monitor_adms,
-                        args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
-                        daemon=True,
-                        name=f"RT-PUSH-{m.addresseip}"
-                    )
+                    watchdog.register(m.id, make_push)
 
+                else:  # STANDALONE_NEW_FIRMWARE
+                    def make_zk(m=m):
+                        return threading.Thread(
+                            target=monitor_zkem,
+                            args=(m, m.addresseip, m.port, 1,
+                                  stop_event_monitoring, tenant, gym_branch_id),
+                            daemon=True,
+                            name=f"RT-ZK-{m.addresseip}"
+                        )
 
-                watchdog.register(m.id, make_push)
+                    watchdog.register(m.id, make_zk)
 
-            else:  # STANDALONE_NEW_FIRMWARE
-                def make_zk(m=m):
-                    return threading.Thread(
-                        target=monitor_zkem,
-                        args=(m, m.addresseip, m.port, 1,
-                              stop_event_monitoring, tenant, gym_branch_id),
-                        daemon=True,
-                        name=f"RT-ZK-{m.addresseip}"
-                    )
-
-
-                watchdog.register(m.id, make_zk)
-
-        watchdog.start()
+            watchdog.start()
         # ───────────────────────────────────────────────────────────────
 
         start_kafka_consumers()

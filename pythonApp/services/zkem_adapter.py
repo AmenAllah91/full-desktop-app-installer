@@ -38,6 +38,15 @@ class ZkemAdapter(DeviceAdapter):
     # ------------------------------------------------------------
 
     def connect(self, max_attempts: int = 3) -> bool:
+        # Appliquer le comKey (communication password) si défini sur la machine
+        com_key = getattr(self.machine, 'comKey', 0) or 0
+        if com_key:
+            try:
+                self.zk.SetCommPassword(com_key)
+                logging.info("🔑 ComKey appliqué pour %s", self.ip)
+            except Exception as e:
+                logging.warning("⚠️ SetCommPassword failed for %s: %s", self.ip, e)
+
         for n in range(1, max_attempts + 1):
             try:
                 if self.zk.Connect_Net(self.ip, self.port):
@@ -80,8 +89,8 @@ class ZkemAdapter(DeviceAdapter):
         self.zk.EnableDevice(self.mn, False)
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
-            # user privileges 0 : user normal , 1 : admin , 2 : superadmin
-        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "",2, True)
+            # user privileges 0 : user normal , 1 : enroller , 2 : admin , 3 : superadmin
+        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 3, True)
         if not ok:
             logging.error("SSR_SetUserInfo KO (pin=%s) err=%s",
                           pin, zkem_last_error(self.zk))
@@ -387,7 +396,7 @@ class ZkemAdapter(DeviceAdapter):
             exists = self.zk.SSR_GetUserInfo(self.mn, str(user_id), name, password, privilege, enabled)
             if not exists[0]:
                 logging.info(f" User {user_id} does not exist, creating...")
-                ok = self.zk.SSR_SetUserInfo(self.mn, str(user_id), f"User{user_id}", "", 0, True)
+                ok = self.zk.SSR_SetUserInfo(self.mn, str(user_id), f"User{user_id}", "", 3, True)
                 if not ok:
                     logging.error(f"Failed to create user {user_id}")
                     return False
@@ -495,4 +504,3 @@ def zkem_last_error(zk) -> Union[int, str]:
             return err.value
         except Exception:
             return "?"
-
