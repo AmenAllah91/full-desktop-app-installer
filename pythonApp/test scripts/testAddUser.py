@@ -16,7 +16,7 @@ except Exception as e:
     raise
 
 def main():
-    IP = "192.168.1.229"
+    IP = "192.168.2.228"
     PORT = 4370              # port par défaut pour ZKTeco TCP/IP
     MACHINE_NUMBER = 1       # numéro machine souvent = 1 pour standalone
     PIN = "1"                # PIN de l'utilisateur à créer / mettre à jour

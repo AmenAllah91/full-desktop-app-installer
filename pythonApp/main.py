@@ -3,7 +3,6 @@ import os
 import signal
 import sys
 import threading
-from datetime import datetime
 
 import psutil
 import logging
@@ -13,22 +12,19 @@ import sqlite3
 
 import pythoncom
 
-from domain import Operation
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
-from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine, make_rt_json, kafka
+from services.MachineMonitor import monitor_machine
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 from queue import Queue
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 
-from services.websocket import start_ws_server, send_pointage
-from services.zkem_adapter import ZkemAdapter
+from services.websocket import start_ws_server
 from services.adms_adapter import ADMSAdapter
 from services.adms_server import ADMSServer
 from services.MonitorADMS import monitor_adms
@@ -96,6 +92,11 @@ KafkaBroker = os.getenv("KAFKA_BROKER")
 # Flask application initialization
 app = Flask(__name__)
 CORS(app)
+
+# Register route blueprints
+from routes import register_blueprints
+register_blueprints(app)
+
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant = os.getenv("TENANT")
 
@@ -126,6 +127,19 @@ MONITORING_INTERVAL = 0.1
 
 TOPIC_CONSUME_PUBLISH_PHOTO = "launch_publish_photo"
 TOPIC_PRODUCE_PUBLISH_PHOTO = "finish_publish_photo"
+
+# ── Sync shared state to app_context (used by route blueprints) ────────────
+import app_context as _ctx
+_ctx.app_version = app_version
+_ctx.currentGymBranchId = currentGymBranchId
+_ctx.tenant = tenant
+_ctx.DB_FILE = DB_FILE
+_ctx.TEMP_DIR = TEMP_DIR
+_ctx.UPLOAD_DIR = os.path.join(TEMP_DIR, "faces")
+_ctx.pointage_kafka = pointage_kafka
+_ctx.publish_photo_kafka = publish_photo_kafka
+_ctx.fingerprint_kafka = fingerprint_kafka
+_ctx.machineService = machineService
 
 
 # ------------------------------------------------------------------ #
@@ -266,20 +280,9 @@ def delete_completedTasks():
     conn.close()
 
 
-def get_device_context(machine_id):
-    """Retourne le DeviceContext pour une machine, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.get(machine_id)
-    else:
-        return DeviceManager.get(machine_id)
-
-
-def get_all_device_contexts():
-    """Retourne tous les DeviceContext, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.all()
-    else:
-        return list(DeviceManager._registry.values())
+# get_device_context / get_all_device_contexts → moved to app_context.py
+get_device_context = _ctx.get_device_context
+get_all_device_contexts = _ctx.get_all_device_contexts
 
 
 def free_port(port, retries=3):
@@ -486,33 +489,7 @@ def consume_fingerprint_client():
             time.sleep(1)
 
 
-@app.route('/getFace/<int:user_pin>/<int:gym_branch_id>/<int:machine_id>', methods=['GET'])
-def capture_fingerprint_api(user_pin, gym_branch_id, machine_id):
-    try:
-        payload = process_user_photo(str(user_pin), str(gym_branch_id), machine_id)
-        if payload:
-            return jsonify(payload), 200
-        else:
-            return jsonify({"error": "Photo not found or machine not valid"}), 400
-    except Exception as e:
-        logging.error(f"❌ Error in capture_fingerprint_api: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/curentconf', methods=['GET'])
-def curentconf():
-    try:
-        payload = {
-            "gymbranchId": currentGymBranchId,
-            "tenant": tenant
-        }
-        if payload:
-            return jsonify(payload), 200
-        else:
-            return jsonify({"error": "Photo not found or machine not valid"}), 400
-    except Exception as e:
-        logging.error(f"❌ Error in capture_fingerprint_api: {e}")
-        return jsonify({"error": str(e)}), 500
+# Routes /getFace, /curentconf → moved to routes/biometric_routes.py, routes/config_routes.py
 
 
 def consume_publish_photo():
@@ -525,7 +502,7 @@ def consume_publish_photo():
             ip = data.get("addresseip")
             port = data.get("port")
 
-            process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
+            _ctx.process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
 
         except Exception as e:
             logging.error(f"❌ Error processing launch_publish_photo message: {e}")
@@ -546,34 +523,7 @@ def consume_publish_photo():
                 backoff = min(backoff * 2, 30)
 
 
-def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
-    if gym_branch_id != currentGymBranchId:
-        return None
-
-    ctx = get_device_context(machine_id)
-    if not ctx:
-        logging.error(f"No context found for machine ID {machine_id}")
-        return None
-
-    adapter = ctx.adapter
-    with ctx.lock:
-        photo_path = f"C:/temp/{user_pin}.jpg"
-        success = adapter.download_user_photo(user_pin, photo_path)
-
-        if success:
-            with open(photo_path, "rb") as f:
-                encoded = base64.b64encode(f.read()).decode("utf-8")
-
-            payload = {
-                "userPin": user_pin,
-                "photo": encoded
-            }
-            publish_photo_kafka.produce(TOPIC_PRODUCE_PUBLISH_PHOTO, json.dumps(payload))
-            logging.info(f"✅ Published photo for user {user_pin} to Kafka.")
-            return payload
-        else:
-            logging.error(f"❌ Failed to download photo for user {user_pin}.")
-            return None
+# process_user_photo → moved to app_context.py
 
 
 def start_kafka_consumers():
@@ -594,525 +544,6 @@ def cleanup_resources(driver=None):
     stop_event_monitoring.set()
     stop_event_kafka.set()
     print("Application shutdown complete")
-
-
-from werkzeug.utils import secure_filename
-from pathlib import Path
-
-UPLOAD_DIR = Path(TEMP_DIR) / "faces"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-@app.route('/face/upload', methods=['POST'])
-def upload_face_multipart():
-    pin = request.form.get('pin')
-    gym_branchId = request.form.get('gymBranchId')
-    file = request.files.get('photo')
-
-    if not all([pin, gym_branchId, file]):
-        abort(400, "pin, gymBranchId et fichier photo sont requis")
-
-    if str(gym_branchId) != str(currentGymBranchId):
-        abort(400, "gymBranchId ne correspond pas à cette instance")
-
-    dst_name = f"verify_biophoto_9_{pin}.jpg"
-    dst_path = UPLOAD_DIR / secure_filename(dst_name)
-    file.save(dst_path)
-    logging.info("📥 Photo enregistrée : %s", dst_path)
-
-    report = {}
-    MAX_UPLOAD_RETRIES = 3
-    RETRY_DELAY = 1
-
-    for ctx in get_all_device_contexts():
-        if str(ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId) != str(currentGymBranchId):
-            continue
-
-        adapter = ctx.adapter
-        ok = False
-
-        for attempt in range(1, MAX_UPLOAD_RETRIES + 1):
-            try:
-                ok = adapter.upload_user_photo(pin, str(dst_path))
-                if ok:
-                    break
-                else:
-                    logging.warning(f"⏱️ Tentative {attempt}/{MAX_UPLOAD_RETRIES} échouée pour {ctx.machine.addresseip}")
-            except Exception as ex:
-                logging.exception(f"❌ Exception lors de l'upload vers {ctx.machine.addresseip} (essai {attempt}) : {ex}")
-
-            time.sleep(RETRY_DELAY)
-
-        report[ctx.machine.addresseip] = "OK" if ok else "KO"
-
-    return jsonify({"pin": pin, "result": report}), 200
-
-
-@app.route('/fingerprint/upload', methods=['POST'])
-def upload_fingerprint():
-    try:
-        data = request.get_json()
-        if not data or "pin" not in data:
-            return jsonify({"error": "Missing 'pin' in request"}), 400
-
-        pin = data["pin"]
-        gym_branch_id = data.get("gymBranchId", currentGymBranchId)
-        finger_id = data.get("fingerId")
-
-        if str(gym_branch_id) != str(currentGymBranchId):
-            return jsonify({"error": "gymBranchId mismatch"}), 400
-
-        logging.info(f" Starting fingerprint upload for PIN {pin}")
-
-        capture = FingerprintCapture()
-        template_bytes, images = capture.capture_fingerprint(save_file=False)
-
-        if not template_bytes:
-            return jsonify({"error": "Failed to capture fingerprint"}), 500
-
-        logging.info(f" Fingerprint captured successfully. Template size: {len(template_bytes)} bytes")
-
-        results = {}
-        success_count = 0
-        total_count = 0
-
-        for ctx in get_all_device_contexts():
-            machine_id = ctx.machine.id
-            branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
-            if str(branch_id) != str(currentGymBranchId):
-                continue
-
-            total_count += 1
-            adapter = ctx.adapter
-            machine_ip = ctx.machine.addresseip
-
-            try:
-                logging.info(f" Uploading to machine {machine_ip} (ID: {machine_id})")
-                with ctx.lock:
-                    success = adapter.add_fingerprint(
-                        user_id=pin,
-                        fingerprint_template=template_bytes,
-                        finger_id=finger_id
-                    )
-
-                if success:
-                    results[machine_ip] = "SUCCESS"
-                    success_count += 1
-                    logging.info(f" Fingerprint uploaded successfully to {machine_ip}")
-                else:
-                    results[machine_ip] = "FAILED"
-                    logging.error(f" Failed to upload fingerprint to {machine_ip}")
-            except Exception as e:
-                results[machine_ip] = f"ERROR: {str(e)}"
-                logging.error(f" Exception uploading to {machine_ip}: {e}")
-
-        python_bytes = bytes(bytearray(template_bytes))
-        encoded_template = base64.b64encode(python_bytes).decode('utf-8')
-        payload = {"fingerprint_template": encoded_template, "pin": pin, "gymBranchId": gym_branch_id,
-                   "operation": Operation.ADD_FINGERPRINT.value, "finger_id": finger_id}
-
-        if success_count == 0:
-            return jsonify({
-                "error": f"Failed to upload fingerprint to all {total_count} machines",
-                "results": results
-            }), 500
-        elif success_count < total_count:
-            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
-            return jsonify({
-                "warning": f"Partial success: {success_count}/{total_count} machines",
-                "results": results,
-                "pin": pin,
-                "fingerprint_template": encoded_template
-            }), 207
-        else:
-            fingerprint_kafka.produce("fingerprint_actions_" + tenant, payload)
-            return jsonify({
-                "message": f"Fingerprint uploaded successfully to all {total_count} machines",
-                "results": results,
-                "pin": pin,
-                "fingerprint_template": encoded_template
-            }), 200
-
-    except Exception as e:
-        logging.exception(f" Fatal error in fingerprint upload: {e}")
-        return jsonify({"error": f"Exception during fingerprint upload: {str(e)}"}), 500
-
-
-@app.route('/config/gymBranchId', methods=['GET'])
-def get_gym_branch_id():
-    return {"gymBranchId": currentGymBranchId}
-
-
-from flask import request, abort
-
-
-@app.route('/api/version', methods=['GET'])
-def get_version():
-    """Retourne la version en cours (v1 ou v2)."""
-    return jsonify({"version": app_version}), 200
-
-
-@app.route('/api/test/add_user', methods=['POST'])
-def test_add_user():
-    """
-    Endpoint de test — ajoute un utilisateur directement sur une machine.
-    Utile pour tester sans passer par Kafka ou Angular.
-
-    Body JSON :
-    {
-        "machineId": 2044,
-        "pin": "99999",
-        "name": "Test User",
-        "cardNo": "",
-        "startDate": "20250101",
-        "endDate": "20261231"
-    }
-    """
-    try:
-        data = request.get_json(force=True)
-        machine_id = data.get("machineId")
-        pin = str(data.get("pin", ""))
-        name = data.get("name", "Test")
-        card_no = data.get("cardNo", "")
-        start_date = data.get("startDate", "")
-        end_date = data.get("endDate", "")
-
-        if not machine_id or not pin:
-            return jsonify({"error": "machineId et pin sont requis"}), 400
-
-        ctx = get_device_context(machine_id)
-        if not ctx:
-            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
-
-        adapter = ctx.adapter
-
-        # Vérifier connexion
-        connected = adapter.is_connected() if hasattr(adapter, 'is_connected') else getattr(adapter, 'connected', False)
-        if not connected:
-            return jsonify({
-                "error": "Machine non connectée",
-                "machine": ctx.machine.alias,
-                "ip": ctx.machine.addresseip,
-                "hint": "Vérifiez que la machine est en mode PUSH et pointe vers ce serveur sur le port 8088"
-            }), 503
-
-        # Tester add_user
-        ok = adapter.add_user(pin, name, card_no, start_date, end_date)
-
-        result = {
-            "operation": "ADD_USER",
-            "success": ok,
-            "machine": ctx.machine.alias,
-            "ip": ctx.machine.addresseip,
-            "pin": pin,
-            "name": name,
-        }
-
-        if ok:
-            # Aussi tester authorize
-            ok_auth = adapter.authorize_user(pin)
-            result["authorize_success"] = ok_auth
-
-        return jsonify(result), 200 if ok else 500
-
-    except Exception as ex:
-        logging.exception("Erreur test add_user: %s", ex)
-        return jsonify({"error": str(ex)}), 500
-
-
-@app.route('/api/test/delete_user', methods=['POST'])
-def test_delete_user():
-    """
-    Endpoint de test — supprime un utilisateur.
-    Body JSON : { "machineId": 2044, "pin": "99999" }
-    """
-    try:
-        data = request.get_json(force=True)
-        machine_id = data.get("machineId")
-        pin = str(data.get("pin", ""))
-
-        ctx = get_device_context(machine_id)
-        if not ctx:
-            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
-
-        adapter = ctx.adapter
-        ok = adapter.delete_user(pin)
-        return jsonify({"operation": "DELETE_USER", "success": ok, "pin": pin}), 200 if ok else 500
-
-    except Exception as ex:
-        return jsonify({"error": str(ex)}), 500
-
-
-@app.route('/api/test/open_door', methods=['POST'])
-def test_open_door():
-    """
-    Endpoint de test — ouvre une porte.
-    Body JSON : { "machineId": 2044, "duration": 5 }
-    """
-    try:
-        data = request.get_json(force=True)
-        machine_id = data.get("machineId")
-        duration = int(data.get("duration", 5))
-
-        ctx = get_device_context(machine_id)
-        if not ctx:
-            return jsonify({"error": f"Machine {machine_id} non trouvée"}), 404
-
-        adapter = ctx.adapter
-
-        if app_version == "v2":
-            ok = adapter.open_door(door_no=1, duration=duration)
-        elif hasattr(adapter, 'open_door'):
-            ok = adapter.open_door(duration_seconds=duration) if hasattr(adapter, 'ACUnlock') else adapter.open_door(door_no=1, duration=duration)
-        else:
-            ok = False
-
-        return jsonify({"operation": "OPEN_DOOR", "success": ok, "duration": duration}), 200 if ok else 500
-
-    except Exception as ex:
-        return jsonify({"error": str(ex)}), 500
-
-
-@app.route('/api/test/queue', methods=['GET'])
-def test_queue_status():
-    """Endpoint de test — affiche l'état de la queue et des commandes en attente."""
-    try:
-        # Commandes en attente dans la SQLite queue
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, task_data, status, created_at FROM task_queue ORDER BY created_at DESC LIMIT 20")
-        tasks = []
-        for row in cursor.fetchall():
-            tasks.append({
-                "id": row[0],
-                "task": json.loads(row[1]) if row[1] else None,
-                "status": row[2],
-                "created_at": row[3]
-            })
-        conn.close()
-
-        # Commandes ADMS en attente dans les adapters
-        adapter_queues = {}
-        for ctx in get_all_device_contexts():
-            adapter = ctx.adapter
-            queue_len = len(getattr(adapter, '_command_queue', []))
-            adapter_queues[ctx.machine.alias] = {
-                "machine_id": ctx.machine.id,
-                "connected": adapter.is_connected() if hasattr(adapter, 'is_connected') else None,
-                "sn": getattr(adapter, 'sn', None),
-                "commands_pending": queue_len,
-            }
-
-        return jsonify({
-            "version": app_version,
-            "sqlite_tasks": tasks,
-            "adapter_queues": adapter_queues
-        }), 200
-
-    except Exception as ex:
-        return jsonify({"error": str(ex)}), 500
-
-
-@app.route('/api/devices', methods=['GET'])
-def get_devices():
-    """Retourne l'état de toutes les machines connectées."""
-    devices = []
-    for ctx in get_all_device_contexts():
-        adapter = ctx.adapter
-        info = {
-            "id": ctx.machine.id,
-            "alias": ctx.machine.alias,
-            "ip": ctx.machine.addresseip,
-            "port": ctx.machine.port,
-            "original_type": ctx.machine.type,
-            "mode": "PUSH/ADMS" if app_version == "v2" else ctx.machine.type,
-        }
-        if app_version == "v2":
-            info["connected"] = adapter.is_connected()
-            info["sn"] = adapter.sn
-            info["last_seen"] = adapter.last_seen.isoformat() if adapter.last_seen else None
-        else:
-            info["connected"] = getattr(adapter, "connected", None)
-        devices.append(info)
-    return jsonify({"version": app_version, "devices": devices}), 200
-
-
-REQUIRED_TOP = {
-    "gymBranchId", "operation",
-    "userPin", "cardNo",
-    "startDate", "endDate",
-    "machines"
-}
-REQUIRED_MACHINE = {"id", "addresseip", "port", "type"}
-
-
-@app.route('/tasks/access', methods=['POST'])
-def enqueue_access_tasks():
-    try:
-        data = request.get_json(force=True)
-    except Exception:
-        abort(400, "Payload JSON invalide")
-
-    if not REQUIRED_TOP.issubset(data):
-        missing = REQUIRED_TOP - data.keys()
-        abort(400, f"Champs manquants : {', '.join(missing)}")
-
-    if str(data["gymBranchId"]) != currentGymBranchId:
-        abort(400, "gymBranchId ne correspond pas à la configuration locale")
-
-    if not isinstance(data["machines"], list) or not data["machines"]:
-        abort(400, "machines doit être une liste non vide")
-
-    queued = 0
-    for m in data["machines"]:
-        if not REQUIRED_MACHINE.issubset(m):
-            abort(400, "Chaque machine doit contenir id, addresseip, port, type")
-
-        task = {
-            "machineId": m["id"],
-            "ip_address": m["addresseip"],
-            "port": str(m["port"]),
-            "user_pin": data["userPin"],
-            "user_name": data["username"],
-            "operation": data["operation"],
-            "card_no": data["cardNo"],
-            "start_date": data["startDate"],
-            "end_date": data["endDate"]
-        }
-        add_task_to_queue(task)
-        queued += 1
-
-    return jsonify({"status": "queued", "tasksQueued": queued}), 201
-
-
-REQUIRED_OPEN = {"gymBranchId", "machineId"}
-
-
-@app.route('/door/open', methods=['POST'])
-def open_door_api():
-    try:
-        data = request.get_json(force=True) or {}
-
-        if not REQUIRED_OPEN.issubset(data):
-            missing = REQUIRED_OPEN - data.keys()
-            abort(400, f"Champs manquants : {', '.join(missing)}")
-
-        gym_branch_id = str(data["gymBranchId"])
-        machine_id = data["machineId"]
-        duration = int(data.get("duration", 5))
-        door_no = int(data.get("door", 1))
-        pin = data.get("pin")
-        porte_type = data.get("porte_type", "ENTREE")
-
-        ctx = get_device_context(machine_id)
-        if not ctx:
-            abort(404, f"Machine {machine_id} inconnue dans DeviceManager")
-
-        adapter = ctx.adapter
-
-        with ctx.lock:
-            if app_version == "v2":
-                ok = adapter.open_door(door_no=door_no, duration=duration)
-            elif isinstance(adapter, PlcommAdapter):
-                ok = adapter.open_door(door_no=door_no, duration=duration)
-            elif isinstance(adapter, ZkemAdapter):
-                ok = adapter.open_door(duration_seconds=duration)
-            elif isinstance(adapter, ADMSAdapter):
-                ok = adapter.open_door(door_no=door_no, duration=duration)
-            else:
-                abort(400, f"Type d'adapter non supporté : {type(adapter).__name__}")
-
-        if not pin:
-            return jsonify({
-                "status": "OK" if ok else "ERROR",
-                "machineId": machine_id,
-                "duration": duration
-            }), 200 if ok else 500
-
-        try:
-            now = datetime.now()
-            dt_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            state_code = 0
-
-            payload_json = make_rt_json(
-                machine_id=ctx.machine.id,
-                ip=ctx.machine.addresseip,
-                mtype=ctx.machine.type,
-                pin=int(pin),
-                state_code=state_code,
-                dt=dt_str,
-                door_id=door_no,
-                card_no=None,
-                gym_branch_id=gym_branch_id,
-                porte_type=porte_type,
-            )
-
-            payload = json.loads(payload_json)
-            kafka.produce("rt_" + tenant, payload)
-            send_pointage(payload, gym_branch_id)
-
-        except Exception as ex:
-            logging.exception("Erreur lors de l'envoi du pointage manuel : %s", ex)
-
-        return jsonify({
-            "status": "OK" if ok else "ERROR",
-            "machineId": machine_id,
-            "duration": duration
-        }), 200 if ok else 500
-
-    except Exception as ex:
-        logging.exception("Erreur /door/open : %s", ex)
-        return jsonify({"status": "ERROR", "message": str(ex)}), 500
-
-
-@app.route('/getFingerprints/<int:user_pin>/<int:gym_branch_id>/<int:machine_id>', methods=['GET'])
-def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
-    try:
-        if int(gym_branch_id) != int(currentGymBranchId):
-            return jsonify({"error": "Machine non valide pour cette gymBranchId"}), 400
-
-        ctx = get_device_context(machine_id)
-        if not ctx:
-            try:
-                ms = AccessMachineService()
-                machines = ms.get_access_machines(str(gym_branch_id), str(tenant))
-                for m in machines:
-                    if app_version == "v2":
-                        DeviceManagerV2.register(m, tenant, gym_branch_id)
-                    else:
-                        DeviceManager.register(m, tenant, gym_branch_id)
-                ctx = get_device_context(machine_id)
-            except Exception as e:
-                logging.error(f"❌ fallback register machines failed: {e}")
-
-        if not ctx:
-            return jsonify({"error": f"Machine ID {machine_id} introuvable côté service"}), 404
-
-        adapter = ctx.adapter
-
-        with ctx.lock:
-            fps = adapter.get_fingerprints(str(user_pin)) or []
-
-        payload = {
-            "userPin": str(user_pin),
-            "gymBranchId": int(gym_branch_id),
-            "machineId": int(machine_id),
-            "machineType": getattr(ctx.machine, "type", None),
-            "fingerprints": fps
-        }
-        return jsonify(payload), 200
-
-    except Exception as e:
-        logging.error(f"❌ Error in get_fingerprints_api: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/adms/status', methods=['GET'])
-def adms_status():
-    try:
-        server = ADMSServer()
-        return jsonify(server.get_connected_devices()), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/restart', methods=['POST'])
 def soft_restart():
@@ -1233,7 +664,7 @@ if __name__ == '__main__':
             format="%(asctime)s — %(levelname)s — %(message)s")
 
         machines = machineService.get_access_machines(gym_branch_id, tenant)
-        print("machines dispo   :", machines)
+        logging.info("machines dispo   :", machines)
 
         if app_version == "v2":
             # ── v2 : Full PUSH/ADMS ──────────────────────────────────
