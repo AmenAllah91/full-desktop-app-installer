@@ -1,139 +1,270 @@
 import asyncio
+import json
+import logging
 import threading
 import time
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from typing import Any, Dict, Optional, Set
+from weakref import WeakSet
 
 import websockets
-import json
-from typing import Dict, Any, Optional
+from websockets.server import WebSocketServerProtocol
 
-_ws_loop = None
-_ws_clients = set()
+logger = logging.getLogger(__name__)
 
 
-async def _ws_handler(ws):
-    _ws_clients.add(ws)
+WS_HOST = "localhost"
+WS_PORT = 8765
+WS_LOOP_POLL_INTERVAL = 0.05  # seconds to wait for loop init
+
+
+
+class WsChannel(str, Enum):
+    """All supported WebSocket broadcast channels."""
+    POINTAGE    = "pointage"
+    SESSION     = "session"
+    FINGERPRINT = "fingerprint"
+    MACHINE     = "machine_status_changed"
+
+
+# ── Payload Model ──────────────────────────────────────────────────────────────
+
+@dataclass
+class WsPayload:
+    """Standardised WebSocket broadcast payload."""
+    type:          str
+    channel:       str
+    gymBranchId:   str
+    data:          Dict[str, Any]
+    timestamp:     float = field(default_factory=time.time)
+
+    @classmethod
+    def from_channel(
+        cls,
+        channel: WsChannel,
+        data: Dict[str, Any],
+        gym_branch_id: str,
+    ) -> "WsPayload":
+        return cls(
+            type=channel.value,
+            channel=channel.value,
+            gymBranchId=gym_branch_id,
+            data=data,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+# ── Server State ───────────────────────────────────────────────────────────────
+
+class WsServerState:
+    """
+    Encapsulates all mutable server state.
+    WeakSet ensures dead connections are garbage-collected automatically.
+    """
+
+    def __init__(self) -> None:
+        # WeakSet: automatically drops disconnected clients without manual cleanup
+        self._clients: WeakSet[WebSocketServerProtocol] = WeakSet()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._lock = threading.Lock()
+
+    @property
+    def loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        return self._loop
+
+    @loop.setter
+    def loop(self, value: asyncio.AbstractEventLoop) -> None:
+        with self._lock:
+            self._loop = value
+
+    def add_client(self, ws: WebSocketServerProtocol) -> None:
+        self._clients.add(ws)
+        logger.info("[WebSocket] Client connected. Total: %d", self.client_count)
+
+    def remove_client(self, ws: WebSocketServerProtocol) -> None:
+        self._clients.discard(ws)
+        logger.info("[WebSocket] Client disconnected. Total: %d", self.client_count)
+
+    @property
+    def client_count(self) -> int:
+        return len(self._clients)
+
+    @property
+    def active_clients(self) -> Set[WebSocketServerProtocol]:
+        # Snapshot to avoid mutation during iteration
+        return set(self._clients)
+
+    @property
+    def is_running(self) -> bool:
+        return self._loop is not None and not self._loop.is_closed()
+
+
+# Module-level singleton
+_state = WsServerState()
+
+
+
+def _handle_subscription(data: Dict[str, Any]) -> None:
+    """Log subscription requests from clients."""
+    channel       = data.get("channel", "unknown")
+    gym_branch_id = data.get("gymBranchId", "unknown")
+    logger.info(
+        "[WebSocket] Client subscribed to channel '%s' for gymBranchId: %s",
+        channel,
+        gym_branch_id,
+    )
+
+
+
+async def _ws_handler(ws: WebSocketServerProtocol) -> None:
+    _state.add_client(ws)
     try:
-        async for message in ws:
-            # Handle incoming messages (subscriptions, etc.)
-            try:
-                data = json.loads(message)
-                print(f"[WebSocket] Received: {data}")
-                if data.get('action') == 'subscribe':
-                    print(
-                        f"[WebSocket] Client subscribed to {data.get('channel')} for gymBranchId: {data.get('gymBranchId')}")
-            except json.JSONDecodeError:
-                print(f"[WebSocket] Invalid JSON received: {message}")
+        async for raw in ws:
+            await _handle_message(raw)
+    except websockets.exceptions.ConnectionClosedError as e:
+        logger.warning("[WebSocket] Connection closed unexpectedly: %s", e)
     finally:
-        _ws_clients.remove(ws)
+        _state.remove_client(ws)
 
 
-async def _ws_broadcast(payload: dict):
-    if _ws_clients:
-        msg = json.dumps(payload, ensure_ascii=False)
-        await asyncio.gather(*(ws.send(msg) for ws in _ws_clients), return_exceptions=True)
+async def _handle_message(raw: str) -> None:
+    try:
+        data: Dict[str, Any] = json.loads(raw)
+        logger.debug("[WebSocket] Received: %s", data)
+
+        action = data.get("action")
+        if action == "subscribe":
+            _handle_subscription(data)
+        else:
+            logger.debug("[WebSocket] Unhandled action: %s", action)
+
+    except json.JSONDecodeError:
+        logger.warning("[WebSocket] Invalid JSON received: %s", raw)
 
 
-def _ws_thread():
-    """Thread dédié : crée la loop, la démarre, puis lance le serveur."""
-    global _ws_loop
-    _ws_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(_ws_loop)
 
-    async def _start():
-        server = await websockets.serve(_ws_handler, "localhost", 8765)
-        print("[WebSocket] Démarré sur ws://localhost:8765")
-        # On ne ferme jamais - wait_closed bloque.
+async def _ws_broadcast(payload: Dict[str, Any]) -> None:
+    """
+    Coroutine: sends payload to all active clients concurrently.
+    return_exceptions=True ensures one failing send doesn't abort the rest.
+    """
+    clients = _state.active_clients
+    if not clients:
+        logger.debug("[WebSocket] No clients connected, skipping broadcast.")
+        return
+
+    msg = json.dumps(payload, ensure_ascii=False)
+    results = await asyncio.gather(
+        *(ws.send(msg) for ws in clients),
+        return_exceptions=True,
+    )
+
+    for ws, result in zip(clients, results):
+        if isinstance(result, Exception):
+            logger.error("[WebSocket] Failed to send to client %s: %s", ws.remote_address, result)
+
+
+def broadcast_ws(payload: Dict[str, Any]) -> None:
+    if not _state.is_running:
+        logger.warning("[WebSocket] Server not running — broadcast dropped.")
+        return
+
+    asyncio.run_coroutine_threadsafe(_ws_broadcast(payload), _state.loop)
+
+
+
+async def _start_server() -> None:
+    """Start the WebSocket server and block until it closes."""
+    async with websockets.serve(_ws_handler, WS_HOST, WS_PORT) as server:
+        logger.info("[WebSocket] Listening on ws://%s:%d", WS_HOST, WS_PORT)
         await server.wait_closed()
 
-    # On planifie la coroutine de démarrage, puis on lance la loop.
-    _ws_loop.create_task(_start())
-    _ws_loop.run_forever()
+
+def _ws_thread() -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    _state.loop = loop
+
+    try:
+        loop.run_until_complete(_start_server())
+    except Exception:
+        logger.exception("[WebSocket] Server crashed.")
+    finally:
+        loop.close()
 
 
-def start_ws_server():
-    """Start the WebSocket server in a separate thread."""
-    t = threading.Thread(target=_ws_thread, daemon=True, name="WebSocketThread")
-    t.start()
-
-    # on attend que _ws_loop soit créé pour pouvoir diffuser ensuite
-    while _ws_loop is None:
-        time.sleep(0.05)
-
-
-def broadcast_ws(payload: dict):
-    """Generic broadcast function."""
-    if _ws_loop:
-        asyncio.run_coroutine_threadsafe(_ws_broadcast(payload), _ws_loop)
-
-
-# === SPECIFIC FUNCTIONS FOR POINTAGE, SESSION, FINGERPRINT ===
-
-def send_pointage(pointage_data: Dict[str, Any], gym_branch_id: str):
+def start_ws_server() -> None:
     """
-    Send pointage data to WebSocket clients.
-
-    Args:
-        pointage_data: Dictionary containing pointage information
-        gym_branch_id: Gym branch identifier for filtering clients
+    Start the WebSocket server in a background daemon thread.
+    Blocks until the event loop is ready to accept broadcasts.
     """
-    payload = {
-        "type": "pointage",
-        "channel": "pointage",
-        "gymBranchId": gym_branch_id,
-        "data": pointage_data,
-        "timestamp": time.time()
-    }
+    if _state.is_running:
+        logger.warning("[WebSocket] Server already running.")
+        return
 
-    print(f"[WebSocket] Broadcasting pointage for gym {gym_branch_id}: {pointage_data}")
-    broadcast_ws(payload)
+    thread = threading.Thread(target=_ws_thread, daemon=True, name="WebSocketThread")
+    thread.start()
+
+    # Spin-wait until the loop is initialised and ready
+    while not _state.is_running:
+        time.sleep(WS_LOOP_POLL_INTERVAL)
+
+    logger.info("[WebSocket] Server is ready.")
 
 
-def send_session(session_data: Dict[str, Any], gym_branch_id: str):
+
+def _broadcast_channel(
+    channel: WsChannel,
+    data: Dict[str, Any],
+    gym_branch_id: str,
+) -> None:
     """
-    Send session data to WebSocket clients.
+    Validate, build, and broadcast a typed channel payload.
 
-    Args:
-        session_data: Dictionary containing session information
-        gym_branch_id: Gym branch identifier for filtering clients
+    Raises:
+        ValueError: if gym_branch_id is empty.
+        TypeError:  if data is not a dict.
     """
-    payload = {
-        "type": "session",
-        "channel": "session",
-        "gymBranchId": gym_branch_id,
-        "data": session_data,
-        "timestamp": time.time()
-    }
+    if not gym_branch_id:
+        raise ValueError("gym_branch_id must not be empty.")
+    if not isinstance(data, dict):
+        raise TypeError(f"data must be a dict, got {type(data).__name__}.")
 
-    print(f"[WebSocket] Broadcasting session for gym {gym_branch_id}: {session_data}")
-    broadcast_ws(payload)
+    payload = WsPayload.from_channel(channel, data, gym_branch_id)
+
+    logger.info(
+        "[WebSocket] Broadcasting '%s' for gym %s",
+        channel.value,
+        gym_branch_id,
+    )
+
+    broadcast_ws(payload.to_dict())
 
 
-def send_fingerprint(fingerprint_data: Dict[str, Any], gym_branch_id: str):
-    """
-    Send fingerprint data to WebSocket clients.
+def send_pointage(data: Dict[str, Any], gym_branch_id: str) -> None:
+    _broadcast_channel(WsChannel.POINTAGE, data, gym_branch_id)
 
-    Args:
-        fingerprint_data: Dictionary containing fingerprint information
-        gym_branch_id: Gym branch identifier for filtering clients
-    """
-    payload = {
-        "type": "fingerprint",
-        "channel": "fingerprint",
-        "gymBranchId": gym_branch_id,
-        "data": fingerprint_data,
-        "timestamp": time.time()
-    }
 
-    print(f"[WebSocket] Broadcasting fingerprint for gym {gym_branch_id}: {fingerprint_data}")
-    broadcast_ws(payload)
+def send_session(data: Dict[str, Any], gym_branch_id: str) -> None:
+    _broadcast_channel(WsChannel.SESSION, data, gym_branch_id)
 
+
+def send_fingerprint(data: Dict[str, Any], gym_branch_id: str) -> None:
+    _broadcast_channel(WsChannel.FINGERPRINT, data, gym_branch_id)
+
+
+def send_machine_status(data: Dict[str, Any], gym_branch_id: str) -> None:
+    _broadcast_channel(WsChannel.MACHINE, data, gym_branch_id)
 
 
 def get_connected_clients_count() -> int:
-    """Get the number of currently connected WebSocket clients."""
-    return len(_ws_clients)
+    """Return the number of currently connected WebSocket clients."""
+    return _state.client_count
 
 
 def is_server_running() -> bool:
-    """Check if the WebSocket server is running."""
-    return _ws_loop is not None and not _ws_loop.is_closed()
+    """Return True if the WebSocket server event loop is active."""
+    return _state.is_running

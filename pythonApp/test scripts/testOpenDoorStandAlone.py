@@ -39,7 +39,7 @@ class StandaloneDevice:
 
 if __name__ == "__main__":
     # Usage : python open_door.py 192.168.1.229 5 123456
-    ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.229"
+    ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.2.228"
     duration = int(sys.argv[2]) if len(sys.argv) > 2 else 5
     comm_key = int(sys.argv[3]) if len(sys.argv) > 3 else 123456
 
