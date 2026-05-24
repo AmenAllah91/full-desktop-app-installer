@@ -16,4 +16,5 @@ class AccessMachine:
     door3: int
     door4: int
     porte_type:DoorType
+    comKey: int = 0
     currentHandle: int = -1
