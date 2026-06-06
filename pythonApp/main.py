@@ -32,7 +32,7 @@ from services.zkem_adapter import ZkemAdapter
 from services.adms_adapter import ADMSAdapter
 from services.adms_server import ADMSServer
 from services.MonitorADMS import monitor_adms
-from services.logger import setup_logging
+from services.logger import setup_logging, log_memory_usage, start_memory_monitor
 
 # v2 imports
 from services.v2.startup import start_v2
@@ -409,6 +409,7 @@ def process_device_queue() -> None:
                         raise RuntimeError("SDK a renvoyé False")
 
                 except Exception as exc:
+                    log_memory_usage(message=f"task_#{task_id}_fail")
                     logging.warning("⚠️ Tâche #%s échec essai %s/%s : %s",
                                     task_id, attempt, MAX_RETRIES, exc,
                                     exc_info=True)
@@ -444,6 +445,7 @@ def process_message_pointage(message):
                 else:
                     logging.error("Missing required fields in machine configuration.")
     except Exception as e:
+        log_memory_usage(message="process_pointage_error")
         logging.error("Error processing pointage_client json_message: %s", e)
 
 
@@ -473,6 +475,7 @@ def consume_pointage_client():
         try:
             pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
         except Exception as e:
+            log_memory_usage(message="pointage_consumer_error")
             logging.error("Error in pointage client consumption loop: %s", e)
             time.sleep(1)
 
@@ -482,6 +485,7 @@ def consume_fingerprint_client():
         try:
             fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
         except Exception as e:
+            log_memory_usage(message="fingerprint_consumer_error")
             logging.error("Error in fingerprint actions consumption loop: %s", e)
             time.sleep(1)
 
@@ -537,6 +541,7 @@ def consume_publish_photo():
             backoff = 1
         except Exception as e:
             msg = str(e)
+            log_memory_usage(message="photo_publish_consumer_error")
             logging.error("Error in publish photo consumption loop: %s", e)
 
             if "UNKNOWN_TOPIC_OR_PART" in msg or "UnknownTopicOrPartition" in msg:
@@ -1229,6 +1234,7 @@ if __name__ == '__main__':
 
     try:
         setup_logging()
+        start_memory_monitor(interval=60, stop_event=stop_event_monitoring)
 
         machines = machineService.get_access_machines(gym_branch_id, tenant)
         logging.info("Machines disponibles: %s", machines)
@@ -1323,6 +1329,7 @@ if __name__ == '__main__':
         logging.info("⏹️ Arrêt demandé par l'utilisateur")
         cleanup_resources(driver)
     except Exception as ex:
+        log_memory_usage(message="fatal_error")
         logging.exception("Erreur fatale : %s", ex)
         cleanup_resources(driver)
         raise

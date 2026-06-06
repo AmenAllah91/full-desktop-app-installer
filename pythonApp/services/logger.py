@@ -1,7 +1,32 @@
 import logging
 import os
 import sys
+import threading
+import time
 from logging.handlers import RotatingFileHandler
+
+
+def log_memory_usage(logger=None, message=""):
+    """Log current process memory usage and detect RAM saturation."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    try:
+        import psutil
+        proc = psutil.Process()
+        rss = proc.memory_info().rss
+        rss_mb = rss / 1024 / 1024
+        sys_mem = psutil.virtual_memory()
+        percent = sys_mem.percent
+        saturated = percent >= 90
+        warning = "⚠️ SATURATION RAM" if saturated else ""
+        logger.info(
+            "MEM %s | RSS=%.0f MB | System RAM=%s%% %s",
+            message, rss_mb, percent, warning
+        )
+    except ImportError:
+        logger.debug("psutil not available, skipping memory log")
+    except Exception:
+        logger.debug("Could not read memory info")
 
 
 def get_logs_dir():
@@ -43,3 +68,14 @@ def setup_logging(level=logging.INFO, log_to_file=True, log_to_console=True):
 
 def get_logger(name):
     return logging.getLogger(name)
+
+
+def start_memory_monitor(interval=60, stop_event=None):
+    """Start a daemon thread that logs memory usage periodically."""
+    def _monitor():
+        while (stop_event is None) or (not stop_event.is_set()):
+            log_memory_usage(message="periodic")
+            time.sleep(interval)
+    t = threading.Thread(target=_monitor, daemon=True, name="MemoryMonitor")
+    t.start()
+    return t
