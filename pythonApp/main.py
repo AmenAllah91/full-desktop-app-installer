@@ -32,6 +32,7 @@ from services.zkem_adapter import ZkemAdapter
 from services.adms_adapter import ADMSAdapter
 from services.adms_server import ADMSServer
 from services.MonitorADMS import monitor_adms
+from services.logger import setup_logging
 
 # v2 imports
 from services.v2.startup import start_v2
@@ -41,20 +42,20 @@ from services.v2.device_manager_v2 import DeviceManagerV2
 app_version = "v1"
 
 def get_app_data_dir():
-    print("[INFO] Trying to get APPDATA environment variable...")
+    logging.info("Trying to get APPDATA environment variable...")
     app_data = os.environ.get('APPDATA')
 
     if not app_data:
-        print("[WARN] APPDATA not found. Falling back to default path...")
+        logging.warning("APPDATA not found. Falling back to default path...")
         app_data = os.path.expanduser('~\\AppData\\Roaming')
     else:
-        print(f"[INFO] APPDATA found: {app_data}")
+        logging.info("APPDATA found: %s", app_data)
 
     app_dir = os.path.join(app_data, 'desktop-app')
-    print(f"[INFO] Full application directory path: {app_dir}")
+    logging.info("Full application directory path: %s", app_dir)
 
     os.makedirs(app_dir, exist_ok=True)
-    print("[INFO] Directory ensured (created if it didn't exist).")
+    logging.info("Directory ensured (created if it didn't exist).")
 
     return app_dir
 
@@ -75,7 +76,7 @@ PLCOMPRO_URL=plcommpro.dll
 """
         with open(ENV_FILE_PATH, 'w') as f:
             f.write(default_env_content)
-        print(f"Created default .env file at: {ENV_FILE_PATH}")
+        logging.info("Created default .env file at: %s", ENV_FILE_PATH)
 
 
 # Get paths for data files
@@ -296,27 +297,27 @@ def free_port(port, retries=3):
                     if proc.is_running():
                         proc.terminate()
                         proc.wait(timeout=3)
-                        print(f"Terminated process {conn.pid} using port {port}")
+                        logging.info("Terminated process %s using port %s", conn.pid, port)
                     else:
-                        print(f"Process {conn.pid} was not running")
+                        logging.info("Process %s was not running", conn.pid)
                 except psutil.NoSuchProcess:
-                    print(f"Process {conn.pid} not found")
+                    logging.warning("Process %s not found", conn.pid)
                 except psutil.AccessDenied:
-                    print(f"Access denied to process {conn.pid}. Attempting force kill...")
+                    logging.warning("Access denied to process %s. Attempting force kill...", conn.pid)
                     try:
                         os.kill(conn.pid, signal.SIGKILL)
-                        print(f"Force-killed process {conn.pid}")
+                        logging.info("Force-killed process %s", conn.pid)
                     except Exception as e:
-                        print(f"Unable to force kill process {conn.pid}: {e}")
+                        logging.error("Unable to force kill process %s: %s", conn.pid, e)
                 except Exception as e:
-                    print(f"Could not terminate process {conn.pid} on port {port}: {e}")
+                    logging.error("Could not terminate process %s on port %s: %s", conn.pid, port, e)
 
         if not found_process:
-            print(f"No processes found on port {port}")
+            logging.info("No processes found on port %s", port)
             return
         else:
             time.sleep(1)
-    print("Retries exhausted. Unable to clear the port completely.")
+    logging.warning("Retries exhausted. Unable to clear the port completely.")
 
 
 def process_device_queue() -> None:
@@ -424,7 +425,7 @@ def process_device_queue() -> None:
 def process_message_pointage(message):
     try:
         json_message = json.loads(message)
-        print(f"Received message from new access request  topic from trenant {tenant}:", message)
+        logging.info("Received message from new access request topic from tenant %s: %s", tenant, message)
         required_keys = ["userPin", "operation", "cardNo", "startDate", "endDate", "machines"]
         if all(key in json_message for key in required_keys) and str(json_message.get("gymBranchId")) == gym_branch_id:
             for machine in json_message.get("machines", []):
@@ -441,14 +442,14 @@ def process_message_pointage(message):
                         "end_date": json_message["endDate"]
                     })
                 else:
-                    print("Error: Missing required fields in machine configuration.")
+                    logging.error("Missing required fields in machine configuration.")
     except Exception as e:
-        print(f"Error processing pointage_client json_message: {e}")
+        logging.error("Error processing pointage_client json_message: %s", e)
 
 
 def process_fingerprint_actions(message):
     json_message = json.loads(message)
-    print(f"Received message from new access request  topic from trenant {tenant}:", message)
+    logging.info("Received message from fingerprint actions topic from tenant %s: %s", tenant, message)
     required_keys = ["pin", "operation", "fingerprint_template", "finger_id"]
     machines = machineService.get_access_machines(gym_branch_id, tenant)
     if all(key in json_message for key in required_keys):
@@ -464,7 +465,6 @@ def process_fingerprint_actions(message):
             })
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -473,7 +473,7 @@ def consume_pointage_client():
         try:
             pointage_kafka.consume(topic='new_access_request_' + tenant, on_message=process_message_pointage)
         except Exception as e:
-            print(f"Error in pointage client consumption loop: {e}")
+            logging.error("Error in pointage client consumption loop: %s", e)
             time.sleep(1)
 
 
@@ -482,7 +482,7 @@ def consume_fingerprint_client():
         try:
             fingerprint_kafka.consume(topic='fingerprint_actions_' + tenant, on_message=process_fingerprint_actions)
         except Exception as e:
-            print(f"Error in fingerprint actions consumption loop: {e}")
+            logging.error("Error in fingerprint actions consumption loop: %s", e)
             time.sleep(1)
 
 
@@ -585,15 +585,15 @@ def start_kafka_consumers():
     pointage_thread.start()
     photo_publish_thread.start()
     fingerprint_actions_thread.start()
-    print("Kafka consumer threads started")
+    logging.info("Kafka consumer threads started")
 
 
 def cleanup_resources(driver=None):
     """Clean up application resources."""
-    print("Initiating cleanup...")
+    logging.info("Initiating cleanup...")
     stop_event_monitoring.set()
     stop_event_kafka.set()
-    print("Application shutdown complete")
+    logging.info("Application shutdown complete")
 
 
 from werkzeug.utils import secure_filename
@@ -1206,7 +1206,7 @@ if __name__ == '__main__':
         tenant = sys.argv[1]
         gym_branch_id = sys.argv[2]
     else:
-        print("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]", file=sys.stderr)
+        logging.error("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]")
         sys.exit(1)
 
     # Parse --version argument
@@ -1215,25 +1215,23 @@ if __name__ == '__main__':
         if idx + 1 < len(sys.argv):
             app_version = sys.argv[idx + 1].lower()
         else:
-            print("--version requires a value (v1 or v2)", file=sys.stderr)
+            logging.error("--version requires a value (v1 or v2)")
             sys.exit(1)
     else:
         app_version = "v1"
 
     if app_version not in ("v1", "v2"):
-        print(f"Version invalide: {app_version}. Attendu: v1 ou v2", file=sys.stderr)
+        logging.error("Version invalide: %s. Attendu: v1 ou v2", app_version)
         sys.exit(1)
 
-    print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}    version : {app_version}")
+    logging.info("Current tenant: %s    gymbranchid: %s    version: %s", tenant, gym_branch_id, app_version)
     currentGymBranchId = gym_branch_id
 
     try:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s — %(levelname)s — %(message)s")
+        setup_logging()
 
         machines = machineService.get_access_machines(gym_branch_id, tenant)
-        print("machines dispo   :", machines)
+        logging.info("Machines disponibles: %s", machines)
 
         if app_version == "v2":
             # ── v2 : Full PUSH/ADMS ──────────────────────────────────

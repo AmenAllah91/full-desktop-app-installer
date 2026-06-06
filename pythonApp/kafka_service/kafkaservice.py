@@ -1,7 +1,11 @@
 import base64
 import json
+import logging
 from confluent_kafka import Producer, Consumer, KafkaException, KafkaError
 import time
+
+logger = logging.getLogger(__name__)
+
 class KafkaService:
     def __init__(self, kafka_broker: str, group_id: str):
         """Initialize Kafka producer and consumer with the provided configurations."""
@@ -38,7 +42,7 @@ class KafkaService:
     def consume(self, topic: str, on_message):
         """Listen to messages from the specified Kafka topic and process them using a callback."""
         self.consumer.subscribe([topic])
-        print(f"Listening to Kafka topic '{topic}'...")
+        logger.info("Listening to Kafka topic '%s'...", topic)
 
         try:
             while True:
@@ -51,18 +55,17 @@ class KafkaService:
                     if msg.error().code() == KafkaError._PARTITION_EOF:
                         continue
                     else:
-                        print(f"Error: {msg.error()}")
+                        logger.error("Kafka error: %s", msg.error())
                         time.sleep(1)
                         continue
 
-                # Decode the message and handle JSON or other formats
                 try:
                     message_value = msg.value().decode('utf-8')
                     on_message(message_value)
 
                 except UnicodeDecodeError:
-                    print("Non-UTF-8 message received:", msg.value())
-                    on_message(msg.value())  # Raw binary handling
+                    logger.warning("Non-UTF-8 message received: %s", msg.value())
+                    on_message(msg.value())
 
         finally:
 

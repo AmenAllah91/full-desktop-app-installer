@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import Flask, request, jsonify, Response, abort
 from flask_cors import CORS
+from services.logger import setup_logging
 
 # ============================================================
 # Configuration
@@ -48,11 +49,7 @@ ADMS_PORT = 8088
 FLASK_API_PORT = 9998
 WS_PORT = 8765
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+setup_logging()
 logger = logging.getLogger("ADMS-Bridge")
 
 
@@ -982,14 +979,14 @@ class ADMSBridge:
     # Start
     # --------------------------------------------------------
     def start(self):
-        print("=" * 60)
-        print("  YoGym ADMS Bridge Server")
-        print(f"  Tenant: {self.tenant}")
-        print(f"  GymBranchId: {self.gym_branch_id}")
-        print(f"  ADMS: http://0.0.0.0:{ADMS_PORT}")
-        print(f"  API:  http://0.0.0.0:{FLASK_API_PORT}")
-        print(f"  WS:   ws://localhost:{WS_PORT}")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("  YoGym ADMS Bridge Server")
+        logger.info("  Tenant: %s", self.tenant)
+        logger.info("  GymBranchId: %s", self.gym_branch_id)
+        logger.info("  ADMS: http://0.0.0.0:%s", ADMS_PORT)
+        logger.info("  API:  http://0.0.0.0:%s", FLASK_API_PORT)
+        logger.info("  WS:   ws://localhost:%s", WS_PORT)
+        logger.info("=" * 60)
 
         # WebSocket
         start_ws_server()
@@ -1021,8 +1018,8 @@ class ADMSBridge:
 # ============================================================
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python adms_bridge.py <TENANT> <GYM_BRANCH_ID>")
-        print("Exemple: python adms_bridge.py empire 1003")
+        logger.error("Usage: python adms_bridge.py <TENANT> <GYM_BRANCH_ID>")
+        logger.error("Exemple: python adms_bridge.py empire 1003")
         sys.exit(1)
 
     tenant = sys.argv[1]

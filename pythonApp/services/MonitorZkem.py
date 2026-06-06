@@ -57,12 +57,12 @@ class ZkemEvents:
             gym_branch_id = self.gym_branch_id,
             porte_type=self.m.porte_type or ""
         )
-        print(payload)
+        logging.info(payload)
         self.kafka.produce("rt_" + self.tenant, payload)
         try:
             send_pointage(json.loads(payload), "1003")  # convertit string JSON → dict
         except Exception as ex:
-            print(f"[WebSocket] Erreur envoi WS: {ex}")
+            logging.error("[WebSocket] Erreur envoi WS: %s", ex)
 
 
 # ------------------------------------------------------------------ #

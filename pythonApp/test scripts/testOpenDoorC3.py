@@ -1,19 +1,13 @@
-"""
-ZKTeco ADMS - Ajouter un utilisateur sur SpeedFace-V3L
-SN: TDBD252200898
-
-1. Lancer: python add_user.py
-2. L'appareil se connecte et reçoit la commande
-3. L'utilisateur est ajouté
-"""
-
 from flask import Flask, request, Response
-import hashlib, time
+import hashlib
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# === LA COMMANDE À ENVOYER ===
-# Modifie ici le user à ajouter
 USER_PIN = "1"
 USER_NAME = "Ahmed"
 COMMAND_SENT = False
@@ -23,7 +17,7 @@ COMMAND_SENT = False
 def cdata():
     sn = request.args.get("SN", "?")
     if request.method == "GET":
-        print(f"\n✅ Appareil connecté: {sn}")
+        logger.info("Appareil connecté: %s", sn)
         session = hashlib.md5(f"{sn}{time.time()}".encode()).hexdigest().upper()
         config = (
             f"GET OPTION FROM: {sn}\r\n"
@@ -38,7 +32,7 @@ def cdata():
     else:
         table = request.args.get("table", "")
         body = request.data.decode("utf-8", errors="replace")
-        print(f"📦 POST cdata table={table}: {body[:200]}")
+        logger.info("POST cdata table=%s: %s", table, body[:200])
         return Response("OK", status=200, content_type="text/plain")
 
 
@@ -46,9 +40,9 @@ def cdata():
 def registry():
     sn = request.args.get("SN", "?")
     body = request.data.decode("utf-8", errors="replace")
-    print(f"📡 Registry: SN={sn}")
+    logger.info("Registry: SN=%s", sn)
     if body:
-        print(f"   {body[:300]}")
+        logger.info("   %s", body[:300])
     return Response(f"RegistryCode=\t{sn}", status=200, content_type="text/plain")
 
 
@@ -60,8 +54,8 @@ def getrequest():
     if not COMMAND_SENT:
         COMMAND_SENT = True
         cmd = f"C:1:DATA UPDATE user\tPin={USER_PIN}\tName={USER_NAME}\tPri=0\tPasswd=\tCardNo=\tGrp=1\tTZ=0000000100000000\tVerify=-1\tViceCard="
-        print(f"\n🚀 ENVOI COMMANDE: Ajout user Pin={USER_PIN} Name={USER_NAME}")
-        print(f"   CMD: {cmd}")
+        logger.info("ENVOI COMMANDE: Ajout user Pin=%s Name=%s", USER_PIN, USER_NAME)
+        logger.info("CMD: %s", cmd)
         return Response(cmd, status=200, content_type="text/plain")
 
     return Response("OK", status=200, content_type="text/plain")
@@ -71,18 +65,18 @@ def getrequest():
 def devicecmd():
     sn = request.args.get("SN", "?")
     body = request.data.decode("utf-8", errors="replace")
-    print(f"\n📨 RÉSULTAT COMMANDE: {body}")
+    logger.info("RÉSULTAT COMMANDE: %s", body)
     if "Return=0" in body:
-        print("✅ SUCCÈS! L'utilisateur a été ajouté!")
+        logger.info("SUCCÈS! L'utilisateur a été ajouté!")
     else:
-        print("❌ ÉCHEC de la commande")
+        logger.error("ÉCHEC de la commande")
     return Response("OK", status=200, content_type="text/plain")
 
 
 @app.route("/iclock/querydata", methods=["POST"])
 def querydata():
     body = request.data.decode("utf-8", errors="replace")
-    print(f"📊 QueryData: {body[:300]}")
+    logger.info("QueryData: %s", body[:300])
     return Response("OK", status=200, content_type="text/plain")
 
 
@@ -97,8 +91,8 @@ def push():
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print(f"  Ajout user: Pin={USER_PIN} Name={USER_NAME}")
-    print(f"  En attente de l'appareil sur port 8088...")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("  Ajout user: Pin=%s Name=%s", USER_PIN, USER_NAME)
+    logger.info("  En attente de l'appareil sur port 8088...")
+    logger.info("=" * 50)
     app.run(host="0.0.0.0", port=8088, debug=False)

@@ -2,7 +2,10 @@ import base64
 import io
 import sys
 import os
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 def _prepare_dll_search_path():
     # Dossier d’extraction PyInstaller (onefile) OU dossier du script en dev
@@ -41,17 +44,17 @@ class FingerprintCapture:
                 raise Exception("No fingerprint device detected!")
 
             self.zk.OpenDevice(0)
-            print(" Fingerprint device initialized successfully")
+            logger.info("Fingerprint device initialized successfully")
             return True
 
         except Exception as e:
-            print(f" Error initializing device: {e}")
+            logger.error("Error initializing device: %s", e)
             return False
 
     def capture_single_template(self, attempt_num):
         """Capture a single fingerprint template and image"""
-        print(f"\nScan {attempt_num}/3 ...")
-        print("Place your finger on the scanner...")
+        logger.info("Scan %s/3 ...", attempt_num)
+        logger.info("Place your finger on the scanner...")
 
         max_attempts = 30
         attempts = 0
@@ -61,15 +64,15 @@ class FingerprintCapture:
                 capture = self.zk.AcquireFingerprint()
                 if capture:
                     template, img = capture
-                    print(f" Captured template {attempt_num}")
+                    logger.info("Captured template %s", attempt_num)
                     return template, img
             except Exception as e:
-                print(f" Capture attempt failed: {e}")
+                logger.warning("Capture attempt failed: %s", e)
 
             time.sleep(1)
             attempts += 1
             if attempts % 5 == 0:
-                print(f"Still waiting... ({attempts}/{max_attempts})")
+                logger.info("Still waiting... (%s/%s)", attempts, max_attempts)
 
         raise Exception(f"Failed to capture template {attempt_num} after {max_attempts} attempts")
 
@@ -84,8 +87,8 @@ class FingerprintCapture:
             else:
                 return merge_result
         except Exception as e:
-            print(f" Error merging templates: {e}")
-            print(" Using first template as fallback")
+            logger.error("Error merging templates: %s", e)
+            logger.warning("Using first template as fallback")
             return templates[0]
 
     def save_template(self, template, filename="fingerprint_final.tpl"):
@@ -104,11 +107,11 @@ class FingerprintCapture:
                 f.write(template)
 
             file_size = os.path.getsize(filename)
-            print(f" Final merged template saved as {filename} ({file_size} bytes)")
+            logger.info("Final merged template saved as %s (%s bytes)", filename, file_size)
             return filename
 
         except Exception as e:
-            print(f" Error saving template: {e}")
+            logger.error("Error saving template: %s", e)
             return None
 
     def save_image(self, image_data, filename="fingerprint.bmp"):
@@ -122,10 +125,10 @@ class FingerprintCapture:
             img_array = img_array.reshape((height, width))
             img = Image.fromarray(img_array)
             img.save(filename)
-            print(f"Fingerprint image saved as {filename}")
+            logger.info("Fingerprint image saved as %s", filename)
             return filename
         except Exception as e:
-            print(f" Error saving image: {e}")
+            logger.error("Error saving image: %s", e)
             return None
 
     def capture_fingerprint(self, save_file=True, template_filename="fingerprint_final.tpl"):
@@ -142,8 +145,8 @@ class FingerprintCapture:
             images = []
             image_files = []
 
-            print("Please scan the same finger 3 times")
-            print("Make sure to place your finger properly on the scanner each time")
+            logger.info("Please scan the same finger 3 times")
+            logger.info("Make sure to place your finger properly on the scanner each time")
 
             for i in range(3):
                 template, img = self.capture_single_template(i + 1)
@@ -165,24 +168,24 @@ class FingerprintCapture:
                 send_fingerprint(data, "1003")
 
                 if i < 2:
-                    print("Please lift your finger and prepare for next scan...")
+                    logger.info("Please lift your finger and prepare for next scan...")
                     time.sleep(2)
-            print("\n Merging templates...")
+            logger.info("Merging templates...")
             final_template = self.merge_templates(templates)
 
             if final_template:
-                print("Templates merged successfully!")
+                logger.info("Templates merged successfully!")
 
                 if save_file:
                     self.save_template(final_template, template_filename)
 
                 return final_template, image_files
             else:
-                print("Failed to merge templates")
+                logger.error("Failed to merge templates")
                 return None, None
 
         except Exception as e:
-            print(f" Error during fingerprint capture: {e}")
+            logger.error("Error during fingerprint capture: %s", e)
             return None, None
 
         finally:
@@ -194,6 +197,6 @@ class FingerprintCapture:
             if self.zk:
                 self.zk.CloseDevice()
                 self.zk.Terminate()
-                print(" Device closed successfully")
+                logger.info("Device closed successfully")
         except Exception as e:
-            print(f" Error during cleanup: {e}")
+            logger.error("Error during cleanup: %s", e)

@@ -18,13 +18,17 @@ USAGE :
 
 import sys
 import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 try:
     import win32com.client
     import pythoncom
 except ImportError:
-    print("[ERROR] pywin32 non installé.")
-    print("[INFO]  Installation : pip install pywin32")
+    logger.error("pywin32 non installé.")
+    logger.info("Installation : pip install pywin32")
     sys.exit(1)
 
 ZKTECO_PORT = 4370
@@ -37,16 +41,13 @@ def test_zkteco_connection(ip_address, port=ZKTECO_PORT):
     """
     zk = None
     try:
-        # Instancier l'objet COM du SDK officiel ZKTeco
         zk = win32com.client.Dispatch('zkemkeeper.ZKEM.1')
 
-        # Connect_Net est la méthode standard du SDK pour TCP/IP
         connected = zk.Connect_Net(ip_address, port)
 
         if not connected:
             return False, None
 
-        # Connexion réussie -> récupérer quelques infos pour valider
         device_info = {}
         machine_number = 1
 
@@ -75,9 +76,8 @@ def test_zkteco_connection(ip_address, port=ZKTECO_PORT):
 
     except pythoncom.com_error as e:
         if zk is None:
-            print(f"\n[ERROR] Impossible d'instancier zkemkeeper.ZKEM.1")
-            print(f"        La DLL est-elle bien enregistrée ?")
-            print(f"        Détail : {e}")
+            logger.error("Impossible d'instancier zkemkeeper.ZKEM.1")
+            logger.error("La DLL est-elle bien enregistrée ? Détail : %s", e)
             sys.exit(1)
         return False, None
     except Exception:
@@ -94,9 +94,9 @@ def find_zkteco_device(network_base="192.168.1", start_ip=1, end_ip=255):
     """
     Scanne la plage d'IPs et s'arrête au premier appareil ZKTeco trouvé.
     """
-    print(f"[*] === Scanner ZKTeco (SDK officiel zkemkeeper) ===")
-    print(f"[*] Reseau : {network_base}.{start_ip} -> {network_base}.{end_ip}")
-    print(f"[*] Port   : {ZKTECO_PORT}\n")
+    logger.info("=== Scanner ZKTeco (SDK officiel zkemkeeper) ===")
+    logger.info("Réseau : %s.%s -> %s.%s", network_base, start_ip, network_base, end_ip)
+    logger.info("Port   : %s", ZKTECO_PORT)
 
     start_time = time.time()
 
@@ -110,24 +110,24 @@ def find_zkteco_device(network_base="192.168.1", start_ip=1, end_ip=255):
         if success:
             elapsed = time.time() - start_time
             print("OK CONNECTE !")
-            print(f"\n{'=' * 60}")
-            print(f"Machine ZKTeco trouvee !")
-            print(f"  IP       : {ip}")
-            print(f"  Port     : {ZKTECO_PORT}")
+            logger.info("=" * 60)
+            logger.info("Machine ZKTeco trouvée !")
+            logger.info("  IP       : %s", ip)
+            logger.info("  Port     : %s", ZKTECO_PORT)
             if info.get('product'):
-                print(f"  Modele   : {info['product']}")
+                logger.info("  Modèle   : %s", info['product'])
             if info.get('serial'):
-                print(f"  Serial   : {info['serial']}")
+                logger.info("  Serial   : %s", info['serial'])
             if info.get('firmware'):
-                print(f"  Firmware : {info['firmware']}")
-            print(f"  Duree    : {elapsed:.2f}s")
-            print(f"{'=' * 60}")
+                logger.info("  Firmware : %s", info['firmware'])
+            logger.info("  Durée    : %.2fs", elapsed)
+            logger.info("=" * 60)
             return ip
         else:
             print("KO")
 
     elapsed = time.time() - start_time
-    print(f"\n[!] Aucune machine ZKTeco trouvee ({elapsed:.2f}s)")
+    logger.info("Aucune machine ZKTeco trouvée (%.2fs)", elapsed)
     return None
 
 
@@ -136,7 +136,6 @@ if __name__ == "__main__":
     start_ip = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     end_ip = int(sys.argv[3]) if len(sys.argv) > 3 else 255
 
-    # Initialiser COM pour le thread courant
     pythoncom.CoInitialize()
     try:
         device_ip = find_zkteco_device(network_base, start_ip, end_ip)
@@ -144,7 +143,7 @@ if __name__ == "__main__":
         pythoncom.CoUninitialize()
 
     if device_ip:
-        print(f"\n>>> IP DE LA MACHINE : {device_ip}")
+        logger.info(">>> IP DE LA MACHINE : %s", device_ip)
         sys.exit(0)
     else:
         sys.exit(1)
