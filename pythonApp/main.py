@@ -1193,9 +1193,46 @@ def soft_restart():
 
     threading.Thread(target=_do_soft_restart, daemon=True, name="SoftRestart").start()
     return jsonify({"status": "restarting"}), 200
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------ #
+# Emergency RAM saturation handler
+# ------------------------------------------------------------------ #
+def _emergency_restart():
+    """
+    Called when system RAM >= 90%. Runs GC, checks again,
+    then spawns a new process and exits.
+    """
+    import gc
+    logging.warning("RAM saturation détectée — tentative de libération mémoire...")
+    log_memory_usage(message="pre_gc")
+    freed = gc.collect()
+    logging.info("GC collecté %s objets — vérification mémoire...", freed)
+    log_memory_usage(message="post_gc")
+
+    try:
+        import psutil
+        if psutil.virtual_memory().percent < 90:
+            logging.info("RAM redescendue sous 90%% après GC — pas de redémarrage")
+            return
+    except Exception:
+        pass
+
+    logging.warning("🚨 RAM toujours saturée après GC — redémarrage de l'application...")
+    log_memory_usage(message="restart")
+    cleanup_resources()
+
+    try:
+        import subprocess
+        args = [sys.executable, __file__] + sys.argv[1:]
+        logging.info("🔄 Lancement du nouveau processus: %s", " ".join(args))
+        subprocess.Popen(args, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    except Exception as e:
+        logging.exception("Impossible de lancer le processus de remplacement: %s", e)
+
+    os._exit(42)
+
+
 if __name__ == '__main__':
     def handle_sigterm(signum, frame):
         logging.info("🚨 Reçu SIGTERM, fermeture propre en cours...")
@@ -1234,7 +1271,7 @@ if __name__ == '__main__':
 
     try:
         setup_logging()
-        start_memory_monitor(interval=60, stop_event=stop_event_monitoring)
+        start_memory_monitor(interval=30, stop_event=stop_event_monitoring, on_saturation=_emergency_restart)
 
         machines = machineService.get_access_machines(gym_branch_id, tenant)
         logging.info("Machines disponibles: %s", machines)

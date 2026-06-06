@@ -70,11 +70,21 @@ def get_logger(name):
     return logging.getLogger(name)
 
 
-def start_memory_monitor(interval=60, stop_event=None):
-    """Start a daemon thread that logs memory usage periodically."""
+def start_memory_monitor(interval=60, stop_event=None, on_saturation=None):
+    """
+    Start a daemon thread that logs memory usage periodically.
+    If on_saturation callback is provided, calls it when system RAM >= 90%.
+    """
     def _monitor():
         while (stop_event is None) or (not stop_event.is_set()):
             log_memory_usage(message="periodic")
+            if on_saturation:
+                try:
+                    import psutil
+                    if psutil.virtual_memory().percent >= 90:
+                        on_saturation()
+                except Exception:
+                    pass
             time.sleep(interval)
     t = threading.Thread(target=_monitor, daemon=True, name="MemoryMonitor")
     t.start()
