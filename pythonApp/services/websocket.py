@@ -2,42 +2,66 @@ import asyncio
 import threading
 import time
 import logging
+import json
+from typing import Dict, Any, Optional, Set
 
 import websockets
-import json
-from typing import Dict, Any, Optional
+from websockets.server import WebSocketServerProtocol
 
 logger = logging.getLogger(__name__)
 
 _ws_loop = None
-_ws_clients = set()
+_ws_clients: Set[WebSocketServerProtocol] = set()
 
 
-async def _ws_handler(ws):
+async def _ws_handler(ws: WebSocketServerProtocol):
     _ws_clients.add(ws)
+    authenticated = False
+    gym_branch_id = None
+
     try:
-        async for message in ws:
+        async for raw in ws:
             try:
-                data = json.loads(message)
-                logger.info("[WebSocket] Received: %s", data)
-                if data.get('action') == 'subscribe':
-                    logger.info(
-                        "[WebSocket] Client subscribed to %s for gymBranchId: %s",
-                        data.get('channel'), data.get('gymBranchId'))
+                data = json.loads(raw)
             except json.JSONDecodeError:
-                logger.warning("[WebSocket] Invalid JSON received: %s", message)
+                logger.warning("[WebSocket] JSON invalide: %s", raw[:200])
+                continue
+
+            action = data.get("action")
+
+            if action == "authenticate":
+                token = data.get("access_token", "")
+                logger.info("[WebSocket] Authentification reçue (token length=%s)", len(token))
+                authenticated = True
+                gym_branch_id = data.get("gymBranchId")
+                await ws.send(json.dumps({"action": "authenticated", "status": "ok"}))
+
+            elif action == "subscribe":
+                ch = data.get("channel")
+                gb = data.get("gymBranchId")
+                logger.info("[WebSocket] Subscribe channel=%s gymBranchId=%s", ch, gb)
+                if gb:
+                    gym_branch_id = gb
+
+            else:
+                logger.info("[WebSocket] Message non géré: %s", data)
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except Exception as e:
+        logger.error("[WebSocket] Erreur handler: %s", e)
     finally:
-        _ws_clients.remove(ws)
+        _ws_clients.discard(ws)
+        logger.info("[WebSocket] Client déconnecté (total: %s)", len(_ws_clients))
 
 
 async def _ws_broadcast(payload: dict):
     if _ws_clients:
         msg = json.dumps(payload, ensure_ascii=False)
-        await asyncio.gather(*(ws.send(msg) for ws in _ws_clients), return_exceptions=True)
+        await asyncio.gather(*(ws.send(msg) for ws in _ws_clients.copy()), return_exceptions=True)
 
 
 def _ws_thread():
-    """Thread dédié : crée la loop, la démarre, puis lance le serveur."""
     global _ws_loop
     _ws_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(_ws_loop)
@@ -52,7 +76,6 @@ def _ws_thread():
 
 
 def start_ws_server():
-    """Start the WebSocket server in a separate thread."""
     t = threading.Thread(target=_ws_thread, daemon=True, name="WebSocketThread")
     t.start()
 
@@ -73,7 +96,6 @@ def send_pointage(pointage_data: Dict[str, Any], gym_branch_id: str):
         "data": pointage_data,
         "timestamp": time.time()
     }
-
     logger.info("[WebSocket] Broadcasting pointage for gym %s", gym_branch_id)
     broadcast_ws(payload)
 
@@ -86,7 +108,6 @@ def send_session(session_data: Dict[str, Any], gym_branch_id: str):
         "data": session_data,
         "timestamp": time.time()
     }
-
     logger.info("[WebSocket] Broadcasting session for gym %s", gym_branch_id)
     broadcast_ws(payload)
 
@@ -99,7 +120,6 @@ def send_fingerprint(fingerprint_data: Dict[str, Any], gym_branch_id: str):
         "data": fingerprint_data,
         "timestamp": time.time()
     }
-
     logger.info("[WebSocket] Broadcasting fingerprint for gym %s", gym_branch_id)
     broadcast_ws(payload)
 

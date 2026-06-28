@@ -20,7 +20,7 @@ from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine, make_rt_json, kafka
+from services.MachineMonitor import monitor_machine, make_rt_json, kafka, attempt_c3_reconnection
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -940,6 +940,54 @@ def get_devices():
             info["connected"] = getattr(adapter, "connected", None)
         devices.append(info)
     return jsonify({"version": app_version, "devices": devices}), 200
+
+
+@app.route('/api/machines/status', methods=['GET'])
+def get_machines_status():
+    machines = []
+    for ctx in get_all_device_contexts():
+        adapter = ctx.adapter
+        machine = ctx.machine
+        if app_version == "v2":
+            connected = adapter.is_connected()
+            last_seen_ts = int(adapter.last_seen.timestamp()) if adapter.last_seen else None
+        else:
+            connected = getattr(adapter, "connected", False) or (getattr(adapter, "handle", None) is not None)
+            last_seen_ts = None
+        machines.append({
+            "type": "machine_status_changed",
+            "machineId": machine.id,
+            "alias": machine.alias,
+            "ip": machine.addresseip,
+            "port": machine.port,
+            "machineType": machine.type,
+            "connected": connected,
+            "lastError": "",
+            "lastSeen": last_seen_ts,
+            "onlineSince": None,
+            "offlineSince": None,
+            "reconnectCount": 0,
+            "eventCount": 0,
+            "reason": "connected" if connected else "disconnected",
+            "timestamp": int(time.time())
+        })
+    return jsonify({"count": len(machines), "machines": machines}), 200
+
+
+@app.route('/api/machines/<int:machine_id>/reconnect', methods=['POST', 'OPTIONS'])
+def reconnect_machine(machine_id):
+    ctx = get_device_context(machine_id)
+    if not ctx:
+        return jsonify({"error": f"Machine {machine_id} not found"}), 404
+    if app_version == "v2":
+        logging.info(f"🔄 Reconnect demandé pour machine v2 {machine_id} — le serveur ADMS attend le heartbeat")
+        return jsonify({"status": "acknowledged", "message": "v2 device reconnection is automatic via heartbeat"}), 200
+    else:
+        success = attempt_c3_reconnection(ctx)
+        if success:
+            return jsonify({"status": "reconnected"}), 200
+        else:
+            return jsonify({"error": "Reconnection failed"}), 500
 
 
 REQUIRED_TOP = {
