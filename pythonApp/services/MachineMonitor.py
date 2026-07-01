@@ -55,7 +55,7 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
                         pass
                 ctx.set_handle(None)
 
-            new_handle = connect_to_device(ip, port)
+            new_handle = connect_to_device(ip, port, com_key=getattr(ctx.machine, "comKey", None))
             if new_handle and is_c3_handle_connected(new_handle):
                 with ctx.lock:
                     ctx.set_handle(new_handle)
@@ -140,7 +140,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
             continue
 
         if ctx.handle is None:
-            h = connect_to_device(ip, port)
+            h = connect_to_device(ip, port, com_key=getattr(ctx.machine, "comKey", None))
             if h:
                 with ctx.lock:
                     ctx.set_handle(h)

@@ -102,8 +102,9 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
         if self.handle:
             return self.handle
         ip, port = self.machine.addresseip, self.machine.port
+        com_key = getattr(self.machine, "comKey", None) or ""
         params = (f"protocol=TCP,ipaddress={ip},port={port},"
-                  "timeout=4000,passwd=").encode()
+                  f"timeout=4000,passwd={com_key}").encode()
         for i in range(1, max_attempts + 1):
             logging.info("PLComm connect %s (%s/%s)", ip, i, max_attempts)
             h = plcommpro.Connect(params)

@@ -29,6 +29,7 @@ class ZkemAdapter(DeviceAdapter):
     def __init__(self, machine):
         super().__init__(machine)  # crée self.handle = None
         self.ip, self.port = machine.addresseip, int(machine.port)
+        self.com_key = getattr(machine, "comKey", None) or 0
         self.mn = 1  # n° machine interne
         self.zk = win32com.client.Dispatch("zkemkeeper.ZKEM")
         self.connected = False  # indicateur interne
@@ -46,6 +47,12 @@ class ZkemAdapter(DeviceAdapter):
                 logging.info("🔑 ComKey appliqué pour %s", self.ip)
             except Exception as e:
                 logging.warning("⚠️ SetCommPassword failed for %s: %s", self.ip, e)
+
+        if self.com_key:
+            try:
+                self.zk.SetCommPassword(int(self.com_key))
+            except Exception as ex:
+                logging.warning("⚠️ SetCommPassword impossible pour %s : %s", self.ip, ex)
 
         for n in range(1, max_attempts + 1):
             try:
