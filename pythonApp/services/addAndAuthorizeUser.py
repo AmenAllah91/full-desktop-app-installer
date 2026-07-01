@@ -21,8 +21,10 @@ plcommpro.SetDeviceData.restype = c_int
 plcommpro.DeleteDeviceData.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p]
 
 
-def connect_to_device(ip_address, port, max_attempts=3):
-    params = f"protocol=TCP,ipaddress={ip_address},port={port},timeout=4000,passwd=".encode('utf-8')
+def connect_to_device(ip_address, port, max_attempts=3, com_key=None):
+    # Prepare the connection parameters
+    passwd = com_key if com_key else ""
+    params = f"protocol=TCP,ipaddress={ip_address},port={port},timeout=4000,passwd={passwd}".encode('utf-8')
     attempts = 0
     handle = None
 
