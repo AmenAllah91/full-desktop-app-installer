@@ -75,6 +75,13 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
     try:
         base = win32com.client.Dispatch("zkemkeeper.ZKEM")
 
+        com_key = getattr(machine, "comKey", None) or 0
+        if com_key:
+            try:
+                base.SetCommPassword(int(com_key))
+            except Exception as ex:
+                logging.warning("⚠️ SetCommPassword impossible pour %s : %s", ip, ex)
+
         if not base.Connect_Net(ip, port):
             err = zkem_last_error(base)
             logging.error("ZKEM connect KO %s:%s err=%s", ip, port, err)

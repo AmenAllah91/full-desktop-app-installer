@@ -16,13 +16,14 @@ except Exception as e:
     raise
 
 def main():
-    IP = "192.168.1.229"
+    IP = "192.168.2.12"
     PORT = 4370              # port par défaut pour ZKTeco TCP/IP
+    COM_KEY = 123456           # comKey de la machine (None/0/"" si elle n'en a pas)
     MACHINE_NUMBER = 1       # numéro machine souvent = 1 pour standalone
     PIN = "1"                # PIN de l'utilisateur à créer / mettre à jour
     NAME = "Amenallah Kraiem"     # Nom affiché
-    PASSWORD = "123456"            # mot de passe (vide si non nécessaire)
-    PRIVILEGE = 2            # 2 = SuperAdmin (selon devices / firmware)
+    PASSWORD = 0           # mot de passe (vide si non nécessaire)
+    PRIVILEGE = 3            # 2 = SuperAdmin (selon devices / firmware)
     ENABLED = True           # True pour activer l'utilisateur
 
     # Créer instance COM
@@ -32,6 +33,13 @@ def main():
         print("Impossible de créer l'objet COM zkemkeeper. Vérifiez que zkemkeeper.dll est enregistré.")
         print("Exception:", e)
         sys.exit(1)
+
+    # ComKey : uniquement pris en compte s'il est renseigné (non vide / non nul)
+    if COM_KEY:
+        try:
+            zk.SetCommPassword(int(COM_KEY))
+        except Exception as e:
+            print("SetCommPassword a levé une exception:", e)
 
     # Tentative de connexion via Connect_Net
     try:

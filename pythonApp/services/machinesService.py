@@ -31,6 +31,7 @@ class AccessMachineService:
                 door2=item.get("door2"),
                 door3=item.get("door3"),
                 door4=item.get("door4"),
-                porte_type=item.get("porte_type")
+                porte_type=item.get("porte_type"),
+                comKey=item.get("comKey") or 0
             ))
         return machines
