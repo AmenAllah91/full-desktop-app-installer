@@ -15,16 +15,29 @@ except Exception as e:
     print("Erreur: pywin32 non installé. Faites: pip install pywin32")
     raise
 
+
+def has_comkey(value):
+    if value is None:
+        return False
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "" or value == "0":
+            return False
+        return True
+    # cas int/float
+    return value != 0
+
+
 def main():
     IP = "192.168.2.12"
     PORT = 4370              # port par défaut pour ZKTeco TCP/IP
-    COM_KEY = 123456           # comKey de la machine (None/0/"" si elle n'en a pas)
-    MACHINE_NUMBER = 1       # numéro machine souvent = 1 pour standalone
-    PIN = "1"                # PIN de l'utilisateur à créer / mettre à jour
-    NAME = "Amenallah Kraiem"     # Nom affiché
-    PASSWORD = 0           # mot de passe (vide si non nécessaire)
-    PRIVILEGE = 3            # 2 = SuperAdmin (selon devices / firmware)
-    ENABLED = True           # True pour activer l'utilisateur
+    COM_KEY = 0         # comKey de la machine (None/0/"" si elle n'en a pas)
+    MACHINE_NUMBER = 1        # numéro machine souvent = 1 pour standalone
+    PIN = "5"                 # PIN de l'utilisateur à créer / mettre à jour
+    NAME = "Aymen Chaabani" # Nom affiché
+    PASSWORD = 0              # mot de passe (vide si non nécessaire)
+    PRIVILEGE = 3             # 2 = SuperAdmin (selon devices / firmware)
+    ENABLED = True            # True pour activer l'utilisateur
 
     # Créer instance COM
     try:
@@ -34,12 +47,16 @@ def main():
         print("Exception:", e)
         sys.exit(1)
 
-    # ComKey : uniquement pris en compte s'il est renseigné (non vide / non nul)
-    if COM_KEY:
+    # --- Gestion du comKey ---
+    if has_comkey(COM_KEY):
         try:
             zk.SetCommPassword(int(COM_KEY))
+            logger.info("ComKey détecté et appliqué: %s", COM_KEY)
         except Exception as e:
-            print("SetCommPassword a levé une exception:", e)
+            logger.error("SetCommPassword a levé une exception: %s", e)
+            # on continue quand même, ça ne doit pas bloquer la connexion
+    else:
+        logger.info("Aucun comKey défini, on ne l'applique pas.")
 
     # Tentative de connexion via Connect_Net
     try:
@@ -94,8 +111,6 @@ def main():
         print(f"Utilisateur PIN={PIN} créé / mis à jour avec succès (privilege={PRIVILEGE}).")
     else:
         print("SetUserInfo a retourné False. Vérifiez les droits, le firmware, ou utilisez SSR_SetUserInfo si disponible.")
-
-        # essai avec SSR_SetUserInfo (signature identique sur plusieurs firmwares)
         try:
             print("Tentative avec SSR_SetUserInfo...")
             res2 = zk.SSR_SetUserInfo(
@@ -113,12 +128,12 @@ def main():
         except Exception as e:
             print("SSR_SetUserInfo indisponible ou a levé une exception:", e)
 
-    # Petit délai puis deconnexion
     time.sleep(0.5)
     try:
         zk.Disconnect()
     except Exception:
         pass
+
 
 if __name__ == "__main__":
     main()
