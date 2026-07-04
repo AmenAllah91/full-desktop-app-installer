@@ -231,6 +231,11 @@ def process_device_queue() -> None:
         try:
             task = json.loads(raw)
             ctx = DeviceManager.get(task["machineId"])
+            if ctx is None:
+                logging.warning("⏭️ Tâche #%s : machine %s non enregistrée sur cette instance, ignorée",
+                                task_id, task["machineId"])
+                mark_task_as_completed(task_id)
+                continue
             op = task["operation"]
             pin = task["user_pin"]
         except Exception as exc:
@@ -456,6 +461,20 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
         else:
             logging.error(f"❌ Failed to download photo for user {user_pin}.")
             return None
+
+
+def ensure_all_kafka_topics():
+    """Proactively create all required Kafka topics at startup."""
+    topics = [
+        'new_access_request_' + tenant,
+        TOPIC_CONSUME_PUBLISH_PHOTO,
+        TOPIC_PRODUCE_PUBLISH_PHOTO,
+        'fingerprint_actions_' + tenant,
+        'rt_' + tenant,
+    ]
+    for topic in topics:
+        pointage_kafka.ensure_topic(topic)
+        time.sleep(0.1)
 
 
 # Start separate Kafka consumer threads
@@ -688,6 +707,27 @@ def enqueue_access_tasks():
 
     return jsonify({"status": "queued", "tasksQueued": queued}), 201
 
+@app.route('/api/machines/status', methods=['GET', 'OPTIONS'])
+def api_machines_status():
+    statuses = []
+    for ctx in DeviceManager.all():
+        adapter = ctx.adapter
+        connected = False
+        try:
+            connected = adapter.is_connected() if hasattr(adapter, 'is_connected') else adapter.handle is not None
+        except Exception:
+            pass
+        statuses.append({
+            "id": ctx.machine.id,
+            "alias": ctx.machine.alias,
+            "ip": ctx.machine.addresseip,
+            "port": ctx.machine.port,
+            "type": ctx.machine.type,
+            "connected": connected,
+        })
+    return jsonify(statuses), 200
+
+
 REQUIRED_OPEN = {"gymBranchId", "machineId"}
 
 @app.route('/door/open', methods=['POST'])
@@ -825,6 +865,9 @@ if __name__ == '__main__':
                                        stop_event_monitoring, tenant, gym_branch_id),
                                  daemon=True,
                                  name=f"RT-ZK-{m.addresseip}").start()
+
+        # Ensure all Kafka topics exist before starting consumers
+        ensure_all_kafka_topics()
 
         # Kafka consumers
         start_kafka_consumers()

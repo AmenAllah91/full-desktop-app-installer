@@ -46,6 +46,6 @@ class DeviceManager:
 
 
     @classmethod
-    def get(cls, mid):      return cls._registry[mid]
+    def get(cls, mid):      return cls._registry.get(mid)
     @classmethod
     def all(cls):           return cls._registry.values()

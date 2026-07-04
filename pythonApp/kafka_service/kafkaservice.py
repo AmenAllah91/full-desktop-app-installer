@@ -1,7 +1,10 @@
 import base64
 import json
 from confluent_kafka import Producer, Consumer, KafkaException, KafkaError
+from confluent_kafka.admin import AdminClient, NewTopic
 import time
+
+
 class KafkaService:
     def __init__(self, kafka_broker: str, group_id: str):
         """Initialize Kafka producer and consumer with the provided configurations."""
@@ -18,15 +21,40 @@ class KafkaService:
             'max.poll.interval.ms': 300000
         })
 
+        # Admin client for topic management
+        self.admin = AdminClient({'bootstrap.servers': kafka_broker})
+        self._topics_ensured = set()
+
+    def ensure_topic(self, topic: str, num_partitions: int = 3, replication_factor: int = 1):
+        """Create the topic if it doesn't exist on the broker."""
+        if topic in self._topics_ensured:
+            return True
+        try:
+            metadata = self.admin.list_topics(timeout=5)
+            if topic in metadata.topics:
+                self._topics_ensured.add(topic)
+                return True
+
+            future = self.admin.create_topics([
+                NewTopic(topic, num_partitions=num_partitions, replication_factor=replication_factor)
+            ])
+            future[topic].result(timeout=5)
+            print(f"✅ Kafka topic '{topic}' created")
+            self._topics_ensured.add(topic)
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if "TOPIC_ALREADY_EXISTS" in err_str or "already exists" in err_str:
+                self._topics_ensured.add(topic)
+                return True
+            print(f"⚠️ Could not ensure topic '{topic}': {e}")
+            return False
+
     def produce(self, topic: str, message):
         """Send a message to the specified Kafka topic."""
-        # def delivery_report(err, msg):
-        #     if err is not None:
-        #         print(f"Message delivery failed: {err}")
-        #     else:
-        #         print(f"Message delivered to {msg.topic()} [{msg.partition()}]")
+        self.ensure_topic(topic)
 
-        # Convert the message to JSON string if it's a dictionary and the topic is not 'rt_fingerprint_capture'
+        # Convert the message to JSON string if it's a dictionary
         json_message = json.dumps(message) if isinstance(message, dict) else str(message)
 
         # Send the message asynchronously
@@ -37,6 +65,7 @@ class KafkaService:
 
     def consume(self, topic: str, on_message):
         """Listen to messages from the specified Kafka topic and process them using a callback."""
+        self.ensure_topic(topic)
         self.consumer.subscribe([topic])
         print(f"Listening to Kafka topic '{topic}'...")
 
@@ -48,12 +77,16 @@ class KafkaService:
                     continue  # No message received
 
                 if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
+                    code = msg.error().code()
+                    if code == KafkaError._PARTITION_EOF:
                         continue
-                    else:
-                        print(f"Error: {msg.error()}")
-                        time.sleep(1)
+                    if code == 3:  # UNKNOWN_TOPIC_OR_PART
+                        print(f"⏳ Topic '{topic}' not available yet, waiting 5s...")
+                        time.sleep(5)
                         continue
+                    print(f"Error: {msg.error()}")
+                    time.sleep(1)
+                    continue
 
                 # Decode the message and handle JSON or other formats
                 try:
@@ -65,7 +98,6 @@ class KafkaService:
                     on_message(msg.value())  # Raw binary handling
 
         finally:
-
             self.consumer.close()
 
     def close(self):

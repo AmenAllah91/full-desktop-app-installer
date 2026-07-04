@@ -1,10 +1,16 @@
 import asyncio
+import logging
 import threading
 import time
 
 import websockets
 import json
 from typing import Dict, Any, Optional
+
+# Silence le bruit des connexions HTTP non-WebSocket sur le port 8765
+logging.getLogger("websockets").setLevel(logging.WARNING)
+logging.getLogger("websockets.server").setLevel(logging.WARNING)
+logging.getLogger("websockets.asyncio.server").setLevel(logging.WARNING)
 
 _ws_loop = None
 _ws_clients = set()
