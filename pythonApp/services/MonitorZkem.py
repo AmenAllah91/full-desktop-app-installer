@@ -11,6 +11,21 @@ from services.websocket import send_pointage
 
 
 # ------------------------------------------------------------------ #
+# Helper : détection robuste d'un comKey valide
+# ------------------------------------------------------------------ #
+def has_comkey(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        value = value.strip()
+        return value not in ("", "0")
+    try:
+        return int(value) != 0
+    except (TypeError, ValueError):
+        return False
+
+
+# ------------------------------------------------------------------ #
 # Helper : lecture compatible GetLastError (v1 ou v2)
 # ------------------------------------------------------------------ #
 def zkem_last_error(zk) -> Union[int, str]:
@@ -29,7 +44,7 @@ def zkem_last_error(zk) -> Union[int, str]:
 
 
 # ------------------------------------------------------------------ #
-# 1) Classe réceptrice d’événements COM
+# 1) Classe réceptrice d'événements COM
 # ------------------------------------------------------------------ #
 class ZkemEvents:
     def __init__(self, m: AccessMachine, ip: str, tenant: str, gym_branch_id: str):
@@ -87,12 +102,15 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             )
             base = win32com.client.Dispatch("zkemkeeper.ZKEM")
 
-        com_key = getattr(machine, "comKey", None) or 0
-        if com_key:
+        com_key = getattr(machine, "comKey", None)
+        if has_comkey(com_key):
             try:
                 base.SetCommPassword(int(com_key))
+                logging.info("ComKey détecté et appliqué pour %s : %s", ip, com_key)
             except Exception as ex:
                 logging.warning("⚠️ SetCommPassword impossible pour %s : %s", ip, ex)
+        else:
+            logging.info("Aucun comKey défini pour %s, on ne l'applique pas.", ip)
 
         if not base.Connect_Net(ip, port):
             err = zkem_last_error(base)
