@@ -82,9 +82,11 @@ def main():
     if result:
         logger.info("Utilisateur PIN=%s créé / mis à jour avec succès (privilege=%s).", PIN, PRIVILEGE)
     else:
-        logger.warning("SetUserInfo a retourné False. Vérifiez les droits, le firmware, ou utilisez SSR_SetUserInfo si disponible.")
+        print("SetUserInfo a retourné False. Vérifiez les droits, le firmware, ou utilisez SSR_SetUserInfo si disponible.")
+
+        # essai avec SSR_SetUserInfo (signature identique sur plusieurs firmwares)
         try:
-            logger.info("Tentative avec SSR_SetUserInfo...")
+            print("Tentative avec SSR_SetUserInfo...")
             res2 = zk.SSR_SetUserInfo(
                 MACHINE_NUMBER,
                 PIN,
@@ -94,12 +96,13 @@ def main():
                 int(ENABLED)
             )
             if res2:
-                logger.info("SSR_SetUserInfo a réussi — utilisateur mis à jour.")
+                print("SSR_SetUserInfo a réussi — utilisateur mis à jour.")
             else:
-                logger.error("SSR_SetUserInfo a aussi échoué.")
+                print("SSR_SetUserInfo a aussi échoué.")
         except Exception as e:
-            logger.error("SSR_SetUserInfo indisponible ou a levé une exception: %s", e)
+            print("SSR_SetUserInfo indisponible ou a levé une exception:", e)
 
+    # Petit délai puis deconnexion
     time.sleep(0.5)
     try:
         zk.Disconnect()
