@@ -70,7 +70,19 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                  tenant: str = "empire", gym_branch_id: str = "0"):
     pythoncom.CoInitialize()
     try:
-        base = win32com.client.Dispatch("zkemkeeper.ZKEM")
+        # gencache.EnsureDispatch (et non Dispatch) est indispensable ici :
+        # WithEvents ne peut pas lier OnAttTransactionEx sur un objet en
+        # dispatch dynamique — la connexion et RegEvent réussissent quand
+        # même, mais aucun événement temps réel n'est jamais reçu.
+        try:
+            base = win32com.client.gencache.EnsureDispatch("zkemkeeper.ZKEM")
+        except Exception as ex:
+            logging.error(
+                "❌ gencache.EnsureDispatch a échoué pour zkemkeeper.ZKEM (%s) — "
+                "les événements temps réel ne seront pas détectés. Essayez de "
+                "vider le cache gencache (%%TEMP%%/gen_py) puis relancez.", ex
+            )
+            base = win32com.client.Dispatch("zkemkeeper.ZKEM")
 
         com_key = getattr(machine, "comKey", None) or 0
         if com_key:
