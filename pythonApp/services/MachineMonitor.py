@@ -106,12 +106,12 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
     TENANT = ctx.tenant
     BRANCH_ID = str(ctx.gymBranchId)
 
-    CONNECTION_CHECK_INTERVAL = 15
+    CONNECTION_CHECK_INTERVAL = 5
     last_check_time = datetime.now()
     consecutive_failures = 0
-    max_consecutive_failures = 3
+    max_consecutive_failures = 2
     last_successful_read = datetime.now()
-    READ_TIMEOUT = 60
+    READ_TIMEOUT = 30
 
     while not stop_evt.is_set():
         now = datetime.now()
@@ -119,6 +119,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
         if now - last_check_time > timedelta(seconds=CONNECTION_CHECK_INTERVAL):
             if ctx.handle and not is_c3_handle_connected(ctx.handle):
                 consecutive_failures += 1
+                ctx.adapter.connected = False
                 logging.warning(
                     f"⚠️ C3 {ip} connexion test failed ({consecutive_failures}/{max_consecutive_failures})"
                 )
@@ -130,6 +131,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                         consecutive_failures = 0
                         last_successful_read = datetime.now()
                         logging.info(f"✅ C3 {ip} reconnecté après test périodique")
+                        ctx.adapter.connected = True
                         ctx.adapter.online_since = time.time()
                         ctx.adapter.last_seen = time.time()
                         ctx.adapter.last_error = ""
@@ -158,6 +160,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
                 logging.info(f"🔌 C3 {ip} connecté")
+                ctx.adapter.connected = True
                 ctx.adapter.last_seen = time.time()
                 ctx.adapter.online_since = time.time()
                 ctx.adapter.offline_since = None
@@ -228,12 +231,14 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 finally:
                     ctx.set_handle(None)
 
+            ctx.adapter.connected = False
             ctx.adapter.last_error = str(exc)
             ctx.adapter.reconnect_count += 1
             if attempt_c3_reconnection(ctx):
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
                 logging.info(f"✅ C3 {ip} reconnecté après erreur")
+                ctx.adapter.connected = True
                 ctx.adapter.online_since = time.time()
                 ctx.adapter.last_seen = time.time()
                 ctx.adapter.last_error = ""
@@ -245,6 +250,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
         if ctx.handle:
             pl.Disconnect(ctx.handle)
         ctx.set_handle(None)
+    ctx.adapter.connected = False
     ctx.adapter.offline_since = time.time()
     send_machine_status_from_ctx(ctx)
     logging.warning("🔌 RT C3 arrêté %s", ip)

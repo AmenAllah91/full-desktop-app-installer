@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import threading
 import time
 import logging
@@ -210,12 +211,22 @@ def _ts_value(val) -> Optional[int]:
     return None
 
 
+def _check_tcp(ip: str, port: int, timeout: float = 2.0) -> bool:
+    """Vérifie si un port TCP est joignable (connexion réelle, pas de cache)."""
+    try:
+        sock = socket.create_connection((ip, port), timeout=timeout)
+        sock.close()
+        return True
+    except (OSError, socket.timeout):
+        return False
+
+
 def send_machine_status(machine, adapter, app_version: str = "v1"):
     """Broadcast machine status change to WebSocket clients in real-time."""
     if app_version == "v2":
         connected = adapter.is_connected()
     else:
-        connected = getattr(adapter, "connected", False) or (getattr(adapter, "handle", None) is not None)
+        connected = _check_tcp(machine.addresseip, int(machine.port))
 
     payload = {
         "type": "machine_status_changed",
@@ -236,7 +247,6 @@ def send_machine_status(machine, adapter, app_version: str = "v1"):
             "timestamp": int(time.time())
         }
     }
-    logger.info("[WebSocket] Broadcasting machine status: %s (connected=%s)", machine.alias, connected)
     broadcast_ws(payload)
 
 
