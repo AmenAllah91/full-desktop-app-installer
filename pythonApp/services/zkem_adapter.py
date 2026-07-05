@@ -112,7 +112,7 @@ class ZkemAdapter(DeviceAdapter):
         try:
             s = datetime.strptime(start_time, "%Y%m%d").strftime("%Y-%m-%d 00:00:00")
             e = datetime.strptime(end_time, "%Y%m%d").strftime("%Y-%m-%d 23:59:59")
-            ok = self.zk.SetUserValidDate(self.mn, int(pin), True, 1, s, e)
+            ok = self.zk.SetUserValidDate(self.mn, int(pin), 1, 1, s, e)
             if not ok:
                 logging.error("SetUserValidDate KO (pin=%s)", pin)
         except Exception as ex:
