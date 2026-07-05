@@ -18,7 +18,7 @@ from typing import Optional
 from domain.AccessMachine import AccessMachine
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
-from services.websocket import send_pointage
+from services.websocket import send_pointage, send_machine_status
 
 
 def monitor_adms(machine: AccessMachine, adapter, stop_evt,
@@ -67,6 +67,10 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
             except Exception as ex:
                 logging.error("[WebSocket] Erreur envoi WS: %s", ex)
 
+            try:
+                adapter.event_count += 1
+            except Exception:
+                pass
             logging.info("📡 PUSH %s → %s", machine.addresseip, payload)
 
         except Exception as e:
@@ -83,10 +87,18 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
             if not getattr(adapter, "_logged_connected", False):
                 logging.info("✅ ADMS %s connecté (SN=%s)", machine.addresseip, adapter.sn)
                 adapter._logged_connected = True
+                adapter.online_since = time.time()
+                adapter.last_seen = time.time()
+                adapter.offline_since = None
+                adapter.last_error = ""
+                send_machine_status(machine, adapter)
         else:
             if getattr(adapter, "_logged_connected", False):
                 logging.warning("⚠️ ADMS %s déconnecté", machine.addresseip)
                 adapter._logged_connected = False
+                adapter.offline_since = time.time()
+                adapter.last_error = "Connexion perdue (heartbeat timeout)"
+                send_machine_status(machine, adapter)
 
         # Dormir par tranches pour pouvoir s'arrêter rapidement
         for _ in range(50):  # 50 * 0.2 = 10 secondes

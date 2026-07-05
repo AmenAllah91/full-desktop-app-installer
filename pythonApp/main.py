@@ -27,7 +27,7 @@ from flask_cors import CORS
 from queue import Queue
 from dotenv import load_dotenv, set_key
 
-from services.websocket import start_ws_server, send_pointage
+from services.websocket import start_ws_server, send_pointage, start_machine_status_broadcast
 from services.zkem_adapter import ZkemAdapter
 from services.adms_adapter import ADMSAdapter
 from services.adms_server import ADMSServer
@@ -96,7 +96,13 @@ KafkaBroker = os.getenv("KAFKA_BROKER")
 
 # Flask application initialization
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], supports_credentials=True)
+
+
+@app.after_request
+def add_private_network_headers(response):
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant = os.getenv("TENANT")
 
@@ -1427,6 +1433,13 @@ if __name__ == '__main__':
         # ───────────────────────────────────────────────────────────────
 
         start_kafka_consumers()
+
+        def _get_all_devices_with_version():
+            return [
+                (ctx.machine, ctx.adapter, app_version)
+                for ctx in get_all_device_contexts()
+            ]
+        start_machine_status_broadcast(_get_all_devices_with_version, interval=5)
 
         free_port(FLASK_PORT)
         threading.Thread(target=lambda: app.run(

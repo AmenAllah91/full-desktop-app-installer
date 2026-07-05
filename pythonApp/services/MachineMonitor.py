@@ -12,7 +12,7 @@ from domain.DoorType import DoorType
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceContext
 from services.addAndAuthorizeUser import connect_to_device
-from services.websocket import send_pointage
+from services.websocket import send_pointage, send_machine_status_from_ctx
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 if not PLCOMPRO_URL:
@@ -124,12 +124,21 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 )
                 if consecutive_failures >= max_consecutive_failures:
                     logging.error(f"🚨 C3 {ip} connexion perdue, tentative de reconnexion")
+                    ctx.adapter.last_error = f"Perte de connexion après {consecutive_failures} échecs"
+                    ctx.adapter.reconnect_count += 1
                     if attempt_c3_reconnection(ctx):
                         consecutive_failures = 0
                         last_successful_read = datetime.now()
                         logging.info(f"✅ C3 {ip} reconnecté après test périodique")
+                        ctx.adapter.online_since = time.time()
+                        ctx.adapter.last_seen = time.time()
+                        ctx.adapter.last_error = ""
+                        send_machine_status_from_ctx(ctx)
                     else:
                         logging.error(f"❌ Échec reconnexion périodique C3 {ip}")
+                        ctx.adapter.offline_since = time.time()
+                        ctx.adapter.last_error = "Échec reconnexion périodique"
+                        send_machine_status_from_ctx(ctx)
             else:
                 consecutive_failures = 0
             last_check_time = now
@@ -149,6 +158,11 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
                 logging.info(f"🔌 C3 {ip} connecté")
+                ctx.adapter.last_seen = time.time()
+                ctx.adapter.online_since = time.time()
+                ctx.adapter.offline_since = None
+                ctx.adapter.last_error = ""
+                send_machine_status_from_ctx(ctx)
             else:
                 time.sleep(1)
                 continue
@@ -194,6 +208,8 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 except Exception as ex:
                     logging.error("[WebSocket] Erreur envoi WS: %s", ex)
 
+                ctx.adapter.last_seen = time.time()
+                ctx.adapter.event_count += 1
                 logging.info("📡 %s → %s", ip, payload)
 
             elif ret == 0:
@@ -212,17 +228,25 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 finally:
                     ctx.set_handle(None)
 
+            ctx.adapter.last_error = str(exc)
+            ctx.adapter.reconnect_count += 1
             if attempt_c3_reconnection(ctx):
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
                 logging.info(f"✅ C3 {ip} reconnecté après erreur")
+                ctx.adapter.online_since = time.time()
+                ctx.adapter.last_seen = time.time()
+                ctx.adapter.last_error = ""
             else:
+                ctx.adapter.offline_since = time.time()
                 time.sleep(1)
 
     with ctx.lock:
         if ctx.handle:
             pl.Disconnect(ctx.handle)
         ctx.set_handle(None)
+    ctx.adapter.offline_since = time.time()
+    send_machine_status_from_ctx(ctx)
     logging.warning("🔌 RT C3 arrêté %s", ip)
 
 

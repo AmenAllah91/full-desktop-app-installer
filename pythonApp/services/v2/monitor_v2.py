@@ -13,13 +13,14 @@ Ce module :
 import json
 import logging
 import time
+from datetime import datetime
 from os import getenv
 from typing import Optional
 
 from domain.AccessMachine import AccessMachine
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
-from services.websocket import send_pointage
+from services.websocket import send_pointage, send_machine_status
 from services.v2.adms_adapter_v2 import ADMSAdapterV2
 from services.v2.adms_server_v2 import ADMSServerV2
 
@@ -79,6 +80,11 @@ def setup_attendance_callback(adms_server: ADMSServerV2,
             except Exception as ex:
                 logger.error("[WebSocket] Erreur: %s", ex)
 
+            try:
+                ctx.adapter.event_count += 1
+            except Exception:
+                pass
+
             logger.info("📡 Pointage: SN=%s, PIN=%s → Kafka + WS", sn, pin)
 
         except Exception as e:
@@ -108,12 +114,20 @@ def monitor_v2_connectivity(adms_server: ADMSServerV2,
                             adapter.machine.addresseip,
                             adapter.sn)
                 logged_states[mid] = True
+                adapter.online_since = datetime.now()
+                adapter.last_seen = datetime.now()
+                adapter.offline_since = None
+                adapter.last_error = ""
+                send_machine_status(adapter.machine, adapter, app_version="v2")
 
             elif not connected and was_connected:
                 logger.warning("⚠️ [%s] %s déconnecté",
                                adapter.machine.alias,
                                adapter.machine.addresseip)
                 logged_states[mid] = False
+                adapter.offline_since = datetime.now()
+                adapter.last_error = "Connexion perdue (heartbeat timeout)"
+                send_machine_status(adapter.machine, adapter, app_version="v2")
 
             elif connected and was_connected is None:
                 # Premier check — déjà connecté
@@ -122,6 +136,11 @@ def monitor_v2_connectivity(adms_server: ADMSServerV2,
                             adapter.machine.addresseip,
                             adapter.sn)
                 logged_states[mid] = True
+                adapter.online_since = datetime.now()
+                adapter.last_seen = datetime.now()
+                adapter.offline_since = None
+                adapter.last_error = ""
+                send_machine_status(adapter.machine, adapter, app_version="v2")
 
         # Sleep interruptible
         for _ in range(check_interval * 5):

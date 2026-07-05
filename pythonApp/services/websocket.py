@@ -3,6 +3,8 @@ import threading
 import time
 import logging
 import json
+from datetime import datetime
+from urllib.parse import parse_qs
 from typing import Dict, Any, Optional, Set
 
 import websockets
@@ -12,12 +14,60 @@ logger = logging.getLogger(__name__)
 
 _ws_loop = None
 _ws_clients: Set[WebSocketServerProtocol] = set()
+_ws_server_ready = threading.Event()
+
+
+def _ws_headers(headers_or_request):
+    """Normaliser l'accès aux headers (Request ou Headers selon la version websockets)."""
+    if hasattr(headers_or_request, "headers"):
+        return headers_or_request.headers
+    return headers_or_request
+
+
+async def _ws_process_request(path, request_headers):
+    """Handle CORS preflight for Chrome Private Network Access (CORS-RFC1918)."""
+    h = _ws_headers(request_headers)
+    upgrade = h.get("Upgrade", "")
+    if upgrade.lower() == "websocket":
+        return None
+
+    origin = h.get("Origin", "")
+    cors_origin = origin if origin else "*"
+
+    response_headers = [
+        ("Access-Control-Allow-Origin", cors_origin),
+        ("Access-Control-Allow-Private-Network", "true"),
+        ("Access-Control-Allow-Methods", "GET, OPTIONS"),
+        ("Access-Control-Allow-Headers",
+         "Content-Type, Authorization, Sec-WebSocket-Protocol, Sec-WebSocket-Extensions"),
+        ("Access-Control-Max-Age", "86400"),
+    ]
+    return 200, response_headers, b"OK"
+
+
+async def _ws_process_response(path, request_headers, response_headers):
+    """Add CORS + Private Network Access headers to WebSocket upgrade response."""
+    h = _ws_headers(request_headers)
+    origin = h.get("Origin", "")
+    if origin:
+        rh = getattr(response_headers, "headers", response_headers)
+        rh["Access-Control-Allow-Origin"] = origin
+        rh["Access-Control-Allow-Private-Network"] = "true"
+        rh["Access-Control-Allow-Credentials"] = "true"
+    return response_headers
 
 
 async def _ws_handler(ws: WebSocketServerProtocol):
     _ws_clients.add(ws)
     authenticated = False
     gym_branch_id = None
+
+    ws_path = getattr(ws, "path", getattr(ws.request, "path", ""))
+    query = parse_qs(ws_path.split("?", 1)[1]) if "?" in ws_path else {}
+    token_from_url = query.get("access_token", [None])[0]
+    if token_from_url:
+        logger.info("[WebSocket] Token extrait de l'URL (length=%s)", len(token_from_url))
+        authenticated = True
 
     try:
         async for raw in ws:
@@ -43,6 +93,14 @@ async def _ws_handler(ws: WebSocketServerProtocol):
                 if gb:
                     gym_branch_id = gb
 
+                if ch == "mahcinestatus":
+                    try:
+                        import main as _main
+                        for ctx in _main.get_all_device_contexts():
+                            send_machine_status(ctx.machine, ctx.adapter, _main.app_version)
+                    except Exception as e:
+                        logger.warning("[WebSocket] Could not send initial machine statuses: %s", e)
+
             else:
                 logger.info("[WebSocket] Message non géré: %s", data)
 
@@ -67,8 +125,17 @@ def _ws_thread():
     asyncio.set_event_loop(_ws_loop)
 
     async def _start():
-        server = await websockets.serve(_ws_handler, "localhost", 8765)
+        server = await websockets.serve(
+            _ws_handler,
+            "localhost",
+            8765,
+            process_request=_ws_process_request,
+            process_response=_ws_process_response,
+            ping_interval=20,
+            ping_timeout=20,
+        )
         logger.info("[WebSocket] Démarré sur ws://localhost:8765")
+        _ws_server_ready.set()
         await server.wait_closed()
 
     _ws_loop.create_task(_start())
@@ -81,6 +148,9 @@ def start_ws_server():
 
     while _ws_loop is None:
         time.sleep(0.05)
+
+    if not _ws_server_ready.wait(timeout=5):
+        logger.warning("[WebSocket] Le serveur ne s'est pas signalé prêt dans les 5s")
 
 
 def broadcast_ws(payload: dict):
@@ -122,6 +192,77 @@ def send_fingerprint(fingerprint_data: Dict[str, Any], gym_branch_id: str):
     }
     logger.info("[WebSocket] Broadcasting fingerprint for gym %s", gym_branch_id)
     broadcast_ws(payload)
+
+
+def _ts_value(val) -> Optional[int]:
+    """Convert a datetime/string/float to Unix timestamp (int) or None."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return int(val.timestamp())
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(datetime.strptime(val, "%Y-%m-%d %H:%M:%S").timestamp())
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def send_machine_status(machine, adapter, app_version: str = "v1"):
+    """Broadcast machine status change to WebSocket clients in real-time."""
+    if app_version == "v2":
+        connected = adapter.is_connected()
+    else:
+        connected = getattr(adapter, "connected", False) or (getattr(adapter, "handle", None) is not None)
+
+    payload = {
+        "type": "machine_status_changed",
+        "data": {
+            "machineId": machine.id,
+            "alias": machine.alias,
+            "ip": machine.addresseip,
+            "port": machine.port,
+            "machineType": machine.type,
+            "connected": connected,
+            "lastError": getattr(adapter, "last_error", ""),
+            "lastSeen": _ts_value(getattr(adapter, "last_seen", None)),
+            "onlineSince": _ts_value(getattr(adapter, "online_since", None)),
+            "offlineSince": _ts_value(getattr(adapter, "offline_since", None)),
+            "reconnectCount": getattr(adapter, "reconnect_count", 0),
+            "eventCount": getattr(adapter, "event_count", 0),
+            "reason": "connected" if connected else "disconnected",
+            "timestamp": int(time.time())
+        }
+    }
+    logger.info("[WebSocket] Broadcasting machine status: %s (connected=%s)", machine.alias, connected)
+    broadcast_ws(payload)
+
+
+def send_machine_status_from_ctx(ctx, app_version: str = "v1"):
+    """Convenience: extract machine+adapter from a DeviceContext object."""
+    send_machine_status(ctx.machine, ctx.adapter, app_version)
+
+
+def start_machine_status_broadcast(get_devices_fn, interval: int = 5):
+    """
+    Lance un thread qui broadcast l'état de toutes les machines toutes les `interval` secondes.
+    `get_devices_fn` doit retourner une liste de tuples (machine, adapter, app_version).
+    """
+    def _loop():
+        while True:
+            try:
+                devices = get_devices_fn()
+                for machine, adapter, app_version in devices:
+                    send_machine_status(machine, adapter, app_version)
+            except Exception as e:
+                logger.warning("[Broadcast] Erreur lors du broadcast périodique: %s", e)
+            time.sleep(interval)
+
+    t = threading.Thread(target=_loop, daemon=True, name="MachineStatusBroadcast")
+    t.start()
+    logger.info("[Broadcast] Thread de statut machines démarré (interval=%ss)", interval)
 
 
 def get_connected_clients_count() -> int:

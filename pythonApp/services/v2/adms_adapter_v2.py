@@ -73,6 +73,13 @@ class ADMSAdapterV2:
         self.device_ip: str = ""
         self.last_seen: Optional[datetime] = None
 
+        # Status tracking
+        self.last_error = ""
+        self.online_since: Optional[datetime] = None
+        self.offline_since: Optional[datetime] = None
+        self.reconnect_count = 0
+        self.event_count = 0
+
         # Compteur de commandes
         self._cmd_counter = 1000
         self._lock = threading.Lock()
