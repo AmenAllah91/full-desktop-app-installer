@@ -232,6 +232,8 @@ def send_machine_status(machine, adapter, app_version: str = "v1"):
     """Broadcast machine status change to WebSocket clients in real-time."""
     if app_version == "v2":
         connected = adapter.is_connected()
+    elif machine.type == "PUSH":
+        connected = adapter.is_connected() if hasattr(adapter, "is_connected") else getattr(adapter, "connected", False)
     else:
         connected = _check_tcp(machine.addresseip, int(machine.port))
 

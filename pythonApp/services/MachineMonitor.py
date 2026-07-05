@@ -111,6 +111,21 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
     last_successful_read = datetime.now()
     READ_TIMEOUT = 30
 
+    def _clean_exit(connected: bool = False, error: str = ""):
+        """Nettoie le handle et broadcast le status final avant de sortir."""
+        with ctx.lock:
+            if ctx.handle:
+                try:
+                    pl.Disconnect(ctx.handle)
+                except Exception:
+                    pass
+                ctx.set_handle(None)
+        ctx.adapter.connected = connected
+        ctx.adapter.offline_since = time.time()
+        if error:
+            ctx.adapter.last_error = error
+        send_machine_status_from_ctx(ctx)
+
     while not stop_evt.is_set():
         now = datetime.now()
 
@@ -122,33 +137,17 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                     f"⚠️ C3 {ip} connexion test failed ({consecutive_failures}/{max_consecutive_failures})"
                 )
                 if consecutive_failures >= max_consecutive_failures:
-                    logging.error(f"🚨 C3 {ip} connexion perdue, tentative de reconnexion")
-                    ctx.adapter.last_error = f"Perte de connexion après {consecutive_failures} échecs"
-                    ctx.adapter.reconnect_count += 1
-                    if attempt_c3_reconnection(ctx):
-                        consecutive_failures = 0
-                        last_successful_read = datetime.now()
-                        logging.info(f"✅ C3 {ip} reconnecté après test périodique")
-                        ctx.adapter.connected = True
-                        ctx.adapter.online_since = time.time()
-                        ctx.adapter.last_seen = time.time()
-                        ctx.adapter.last_error = ""
-                        send_machine_status_from_ctx(ctx)
-                    else:
-                        logging.error(f"❌ Échec reconnexion périodique C3 {ip}")
-                        ctx.adapter.offline_since = time.time()
-                        ctx.adapter.last_error = "Échec reconnexion périodique"
-                        send_machine_status_from_ctx(ctx)
+                    logging.error(f"🚨 C3 {ip} connexion perdue, le thread va s'arrêter (watchdog relancera)")
+                    _clean_exit(connected=False, error=f"Perte de connexion après {consecutive_failures} échecs")
+                    return
             else:
                 consecutive_failures = 0
             last_check_time = now
 
         if ctx.handle and now - last_successful_read > timedelta(seconds=READ_TIMEOUT):
-            logging.warning(f"⏰ C3 {ip} timeout de lecture ({READ_TIMEOUT}s), tentative de reconnexion")
-            if attempt_c3_reconnection(ctx):
-                last_successful_read = datetime.now()
-                consecutive_failures = 0
-            continue
+            logging.warning(f"⏰ C3 {ip} timeout de lecture ({READ_TIMEOUT}s), le thread va s'arrêter")
+            _clean_exit(connected=False, error=f"Timeout de lecture après {READ_TIMEOUT}s")
+            return
 
         if ctx.handle is None:
             h = connect_to_device(ip, port, com_key=getattr(ctx.machine, "comKey", None))
@@ -218,40 +217,15 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 time.sleep(0.2)
             else:
                 logging.warning(f"GetRTLog returned error {ret} for {ip}")
-                raise Exception(f"GetRTLog error: {ret}")
+                _clean_exit(connected=False, error=f"GetRTLog error: {ret}")
+                return
 
         except Exception as exc:
             logging.error("RT %s: %s", ctx.machine.alias, exc, exc_info=True)
+            _clean_exit(connected=False, error=str(exc))
+            return
 
-            with ctx.lock:
-                try:
-                    if ctx.handle:
-                        pl.Disconnect(ctx.handle)
-                finally:
-                    ctx.set_handle(None)
-
-            ctx.adapter.connected = False
-            ctx.adapter.last_error = str(exc)
-            ctx.adapter.reconnect_count += 1
-            if attempt_c3_reconnection(ctx):
-                last_successful_read = datetime.now()
-                consecutive_failures = 0
-                logging.info(f"✅ C3 {ip} reconnecté après erreur")
-                ctx.adapter.connected = True
-                ctx.adapter.online_since = time.time()
-                ctx.adapter.last_seen = time.time()
-                ctx.adapter.last_error = ""
-            else:
-                ctx.adapter.offline_since = time.time()
-                time.sleep(1)
-
-    with ctx.lock:
-        if ctx.handle:
-            pl.Disconnect(ctx.handle)
-        ctx.set_handle(None)
-    ctx.adapter.connected = False
-    ctx.adapter.offline_since = time.time()
-    send_machine_status_from_ctx(ctx)
+    _clean_exit(connected=False)
     logging.warning("🔌 RT C3 arrêté %s", ip)
 
 

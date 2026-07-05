@@ -1,4 +1,5 @@
 import json
+import socket
 from datetime import datetime
 import pythoncom, win32com.client, ctypes, logging, time
 from typing import Union
@@ -145,6 +146,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             from services.DeviceMAnager import DeviceManager
             ctx = DeviceManager.get(machine.id)
             if ctx:
+                ctx.adapter.connected = True
                 ctx.adapter.last_seen = time.time()
                 ctx.adapter.online_since = time.time()
                 ctx.adapter.offline_since = None
@@ -153,9 +155,32 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
         except Exception:
             pass
 
+        _zk_check_interval = 10
+        _zk_last_check = time.time()
+
         while stop_evt is None or not stop_evt.is_set():
+            now = time.time()
+            if now - _zk_last_check >= _zk_check_interval:
+                _zk_last_check = now
+                try:
+                    sock = socket.create_connection((ip, port), timeout=2)
+                    sock.close()
+                except (OSError, socket.timeout):
+                    logging.warning("⚠️ ZKEM %s:%s injoignable, arrêt du thread (watchdog relancera)", ip, port)
+                    try:
+                        from services.DeviceMAnager import DeviceManager
+                        ctx = DeviceManager.get(machine.id)
+                        if ctx:
+                            ctx.adapter.connected = False
+                            ctx.adapter.offline_since = time.time()
+                            ctx.adapter.last_error = "Machine injoignable (TCP)"
+                            send_machine_status(machine, ctx.adapter)
+                    except Exception:
+                        pass
+                    break
+
             pythoncom.PumpWaitingMessages()
-            time.sleep(0.05)  # Réactivité meilleure
+            time.sleep(0.05)
     finally:
         try:
             base.Disconnect()

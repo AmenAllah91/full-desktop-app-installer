@@ -85,6 +85,7 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
             if not getattr(adapter, "_logged_connected", False):
                 logging.info("✅ ADMS %s connecté (SN=%s)", machine.addresseip, adapter.sn)
                 adapter._logged_connected = True
+                adapter.connected = True
                 adapter.online_since = time.time()
                 adapter.last_seen = time.time()
                 adapter.offline_since = None
@@ -94,6 +95,7 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
             if getattr(adapter, "_logged_connected", False):
                 logging.warning("⚠️ ADMS %s déconnecté", machine.addresseip)
                 adapter._logged_connected = False
+                adapter.connected = False
                 adapter.offline_since = time.time()
                 adapter.last_error = "Connexion perdue (heartbeat timeout)"
                 send_machine_status(machine, adapter)
