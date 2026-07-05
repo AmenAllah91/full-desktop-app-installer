@@ -96,7 +96,7 @@ KafkaBroker = os.getenv("KAFKA_BROKER")
 
 # Flask application initialization
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant = os.getenv("TENANT")
 
