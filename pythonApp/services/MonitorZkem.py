@@ -6,7 +6,7 @@ import pywintypes
 
 from domain import AccessMachine
 from services.MachineMonitor import make_rt_json
-from services.websocket import send_pointage
+from services.websocket import send_pointage, send_machine_status
 
 
 # ------------------------------------------------------------------ #
@@ -73,9 +73,19 @@ class ZkemEvents:
         print(payload)
         # self.kafka.produce("rt_" + self.tenant, payload)
         try:
-            send_pointage(json.loads(payload), "1003")  # convertit string JSON → dict
+            send_pointage(json.loads(payload), "1003")
         except Exception as ex:
-            print(f"[WebSocket] Erreur envoi WS: {ex}")
+            print("[WebSocket] Erreur envoi WS: %s", ex)
+
+        try:
+            from services.DeviceMAnager import DeviceManager
+            ctx = DeviceManager.get(self.m.id)
+            if ctx:
+                ctx.adapter.event_count += 1
+                ctx.adapter.last_seen = time.time()
+        except Exception:
+            pass
+
 
 # ------------------------------------------------------------------ #
 # 2) Thread de surveillance temps-réel — version sans conflit
@@ -131,6 +141,17 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             return
 
         logging.info("🟢 RTLog ZKEM connecté %s:%s", ip, port)
+        try:
+            from services.DeviceMAnager import DeviceManager
+            ctx = DeviceManager.get(machine.id)
+            if ctx:
+                ctx.adapter.last_seen = time.time()
+                ctx.adapter.online_since = time.time()
+                ctx.adapter.offline_since = None
+                ctx.adapter.last_error = ""
+                send_machine_status(machine, ctx.adapter)
+        except Exception:
+            pass
 
         while stop_evt is None or not stop_evt.is_set():
             pythoncom.PumpWaitingMessages()

@@ -18,6 +18,12 @@ class DeviceAdapter(ABC):
     def __init__(self, machine):
         self.machine = machine  # modèle AccessMachine
         self.handle = None  # pointeur PLComm ou None
+        self.last_seen = None      # timestamp Unix dernier événement
+        self.online_since = None   # timestamp Unix mise en ligne
+        self.offline_since = None  # timestamp Unix mise hors-ligne
+        self.reconnect_count = 0
+        self.event_count = 0
+        self.last_error = ""
 
     # ---- connexion
     @abstractmethod
