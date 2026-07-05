@@ -17,7 +17,7 @@ from domain import Operation
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
-from services.adapters import PlcommAdapter
+from services.adapters import PlcommAdapter, MachineType
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
 from services.MachineMonitor import monitor_machine, make_rt_json, kafka, attempt_c3_reconnection
@@ -979,15 +979,41 @@ def reconnect_machine(machine_id):
     ctx = get_device_context(machine_id)
     if not ctx:
         return jsonify({"error": f"Machine {machine_id} not found"}), 404
-    if app_version == "v2":
-        logging.info(f"🔄 Reconnect demandé pour machine v2 {machine_id} — le serveur ADMS attend le heartbeat")
-        return jsonify({"status": "acknowledged", "message": "v2 device reconnection is automatic via heartbeat"}), 200
-    else:
-        success = attempt_c3_reconnection(ctx)
-        if success:
-            return jsonify({"status": "reconnected"}), 200
-        else:
-            return jsonify({"error": "Reconnection failed"}), 500
+    mtype = ctx.machine.type
+    logging.info(f"🔄 Reconnect demandé pour machine {machine_id} type={mtype}")
+    try:
+        if app_version == "v2":
+            logging.info(f"  v2 machine {machine_id} — reconnexion automatique via ADMS heartbeat")
+            return jsonify({"status": "acknowledged", "message": "v2 device reconnection is automatic via heartbeat"}), 200
+
+        if mtype == MachineType.C3.name or mtype == "C3":
+            success = attempt_c3_reconnection(ctx)
+            if success:
+                return jsonify({"status": "reconnected"}), 200
+            return jsonify({"error": "C3 reconnection failed"}), 500
+
+        if mtype == MachineType.STANDALONE_NEW_FIRMWARE.name or mtype == "STANDALONE_NEW_FIRMWARE":
+            adapter = ctx.adapter
+            with ctx.lock:
+                adapter.disconnect()
+                success = adapter.connect()
+            if success:
+                logging.info(f"✅ Standalone {machine_id} reconnecté")
+                return jsonify({"status": "reconnected"}), 200
+            return jsonify({"error": "Standalone reconnection failed"}), 500
+
+        if mtype == "PUSH":
+            if isinstance(ctx.adapter, ADMSAdapter):
+                with ctx.lock:
+                    ctx.adapter.disconnect()
+                logging.info(f"🔌 PUSH {machine_id} marqué déconnecté — en attente du handshake")
+                return jsonify({"status": "disconnected", "message": "PUSH device marked disconnected, waiting for handshake"}), 200
+            return jsonify({"error": "PUSH adapter not found"}), 500
+
+        return jsonify({"error": f"Unknown machine type: {mtype}"}), 400
+    except Exception as e:
+        logging.exception(f"❌ Reconnect error for machine {machine_id}: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 REQUIRED_TOP = {
