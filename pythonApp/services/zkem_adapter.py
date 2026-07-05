@@ -97,7 +97,7 @@ class ZkemAdapter(DeviceAdapter):
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
             # user privileges 0 : user normal , 1 : enroller , 2 : admin , 3 : superadmin
-        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 3, True)
+        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 0, True)
         if not ok:
             logging.error("SSR_SetUserInfo KO (pin=%s) err=%s",
                           pin, zkem_last_error(self.zk))
@@ -112,7 +112,7 @@ class ZkemAdapter(DeviceAdapter):
         try:
             s = datetime.strptime(start_time, "%Y%m%d").strftime("%Y-%m-%d 00:00:00")
             e = datetime.strptime(end_time, "%Y%m%d").strftime("%Y-%m-%d 23:59:59")
-            ok = self.zk.SetUserValidDate(self.mn, int(pin), 1, 1, s, e)
+            ok = self.zk.SetUserValidDate(self.mn, int(pin), True, 1, s, e)
             if not ok:
                 logging.error("SetUserValidDate KO (pin=%s)", pin)
         except Exception as ex:
@@ -403,7 +403,7 @@ class ZkemAdapter(DeviceAdapter):
             exists = self.zk.SSR_GetUserInfo(self.mn, str(user_id), name, password, privilege, enabled)
             if not exists[0]:
                 logging.info(f" User {user_id} does not exist, creating...")
-                ok = self.zk.SSR_SetUserInfo(self.mn, str(user_id), f"User{user_id}", "", 3, True)
+                ok = self.zk.SSR_SetUserInfo(self.mn, str(user_id), f"User{user_id}", "", 0, True)
                 if not ok:
                     logging.error(f"Failed to create user {user_id}")
                     return False
