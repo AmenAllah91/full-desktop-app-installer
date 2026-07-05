@@ -1394,6 +1394,13 @@ if __name__ == '__main__':
             ]
         start_machine_status_broadcast(_get_all_devices_with_version, interval=5)
 
+        def _get_all_devices_with_version():
+            return [
+                (ctx.machine, ctx.adapter, app_version)
+                for ctx in get_all_device_contexts()
+            ]
+        start_machine_status_broadcast(_get_all_devices_with_version, interval=5)
+
         free_port(FLASK_PORT)
         threading.Thread(target=lambda: app.run(
             debug=False, host=FLASK_HOST, port=FLASK_PORT),

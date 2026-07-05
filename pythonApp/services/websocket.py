@@ -7,9 +7,12 @@ import json
 from datetime import datetime
 logger = logging.getLogger(__name__)
 from urllib.parse import parse_qs
+from typing import Dict, Any, Optional, Set
+
 import websockets
 from websockets.server import WebSocketServerProtocol
-from typing import Dict, Any, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 _ws_loop = None
 _ws_clients: Set[WebSocketServerProtocol] = set()
@@ -65,7 +68,7 @@ async def _ws_handler(ws: WebSocketServerProtocol):
     query = parse_qs(ws_path.split("?", 1)[1]) if "?" in ws_path else {}
     token_from_url = query.get("access_token", [None])[0]
     if token_from_url:
-        print("[WebSocket] Token extrait de l'URL (length=%s)", len(token_from_url))
+        logger.info("[WebSocket] Token extrait de l'URL (length=%s)", len(token_from_url))
         authenticated = True
 
     try:
@@ -73,14 +76,14 @@ async def _ws_handler(ws: WebSocketServerProtocol):
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
-                print("[WebSocket] JSON invalide: %s", raw[:200])
+                logger.warning("[WebSocket] JSON invalide: %s", raw[:200])
                 continue
 
             action = data.get("action")
 
             if action == "authenticate":
                 token = data.get("access_token", "")
-                print("[WebSocket] Authentification reçue (token length=%s)", len(token))
+                logger.info("[WebSocket] Authentification reçue (token length=%s)", len(token))
                 authenticated = True
                 gym_branch_id = data.get("gymBranchId")
                 await ws.send(json.dumps({"action": "authenticated", "status": "ok"}))
@@ -88,7 +91,7 @@ async def _ws_handler(ws: WebSocketServerProtocol):
             elif action == "subscribe":
                 ch = data.get("channel")
                 gb = data.get("gymBranchId")
-                print("[WebSocket] Subscribe channel=%s gymBranchId=%s", ch, gb)
+                logger.info("[WebSocket] Subscribe channel=%s gymBranchId=%s", ch, gb)
                 if gb:
                     gym_branch_id = gb
 
@@ -98,15 +101,15 @@ async def _ws_handler(ws: WebSocketServerProtocol):
                         for ctx in _main.get_all_device_contexts():
                             send_machine_status(ctx.machine, ctx.adapter, _main.app_version)
                     except Exception as e:
-                        print("[WebSocket] Could not send initial machine statuses: %s", e)
+                        logger.warning("[WebSocket] Could not send initial machine statuses: %s", e)
 
             else:
-                print("[WebSocket] Message non géré: %s", data)
+                logger.info("[WebSocket] Message non géré: %s", data)
 
     except websockets.exceptions.ConnectionClosed:
         pass
     except Exception as e:
-        print("[WebSocket] Erreur handler: %s", e)
+        logger.error("[WebSocket] Erreur handler: %s", e)
     finally:
         _ws_clients.discard(ws)
         logger.info("[WebSocket] Client déconnecté (total: %s)", len(_ws_clients))
@@ -133,7 +136,7 @@ def _ws_thread():
             ping_interval=20,
             ping_timeout=20,
         )
-        print("[WebSocket] Démarré sur ws://localhost:8765")
+        logger.info("[WebSocket] Démarré sur ws://localhost:8765")
         _ws_server_ready.set()
         await server.wait_closed()
 
@@ -149,7 +152,7 @@ def start_ws_server():
         time.sleep(0.05)
 
     if not _ws_server_ready.wait(timeout=5):
-        print("[WebSocket] Le serveur ne s'est pas signalé prêt dans les 5s")
+        logger.warning("[WebSocket] Le serveur ne s'est pas signalé prêt dans les 5s")
 
 
 def broadcast_ws(payload: dict):
@@ -165,19 +168,11 @@ def send_pointage(pointage_data: Dict[str, Any], gym_branch_id: str):
         "data": pointage_data,
         "timestamp": time.time()
     }
-
-    print(f"[WebSocket] Broadcasting pointage for gym {gym_branch_id}: {pointage_data}")
+    logger.info("[WebSocket] Broadcasting pointage for gym %s", gym_branch_id)
     broadcast_ws(payload)
 
 
 def send_session(session_data: Dict[str, Any], gym_branch_id: str):
-    """
-    Send session data to WebSocket clients.
-
-    Args:
-        session_data: Dictionary containing session information
-        gym_branch_id: Gym branch identifier for filtering clients
-    """
     payload = {
         "type": "session",
         "channel": "session",
@@ -185,8 +180,7 @@ def send_session(session_data: Dict[str, Any], gym_branch_id: str):
         "data": session_data,
         "timestamp": time.time()
     }
-
-    print(f"[WebSocket] Broadcasting session for gym {gym_branch_id}: {session_data}")
+    logger.info("[WebSocket] Broadcasting session for gym %s", gym_branch_id)
     broadcast_ws(payload)
 
 
@@ -198,8 +192,7 @@ def send_fingerprint(fingerprint_data: Dict[str, Any], gym_branch_id: str):
         "data": fingerprint_data,
         "timestamp": time.time()
     }
-
-    print(f"[WebSocket] Broadcasting fingerprint for gym {gym_branch_id}: {fingerprint_data}")
+    logger.info("[WebSocket] Broadcasting fingerprint for gym %s", gym_branch_id)
     broadcast_ws(payload)
 
 
@@ -277,12 +270,12 @@ def start_machine_status_broadcast(get_devices_fn, interval: int = 5):
                 for machine, adapter, app_version in devices:
                     send_machine_status(machine, adapter, app_version)
             except Exception as e:
-                print("[Broadcast] Erreur lors du broadcast périodique: %s", e)
+                logger.warning("[Broadcast] Erreur lors du broadcast périodique: %s", e)
             time.sleep(interval)
 
     t = threading.Thread(target=_loop, daemon=True, name="MachineStatusBroadcast")
     t.start()
-    print("[Broadcast] Thread de statut machines démarré (interval=%ss)", interval)
+    logger.info("[Broadcast] Thread de statut machines démarré (interval=%ss)", interval)
 
 
 def get_connected_clients_count() -> int:

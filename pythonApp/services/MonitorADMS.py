@@ -1,6 +1,6 @@
 """
 services/MonitorADMS.py
-=======================
+========================
 Module de monitoring pour les appareils PUSH/ADMS.
 
 Contrairement aux monitors C3 (polling GetRTLog) et ZKEM (événements COM),
@@ -38,12 +38,9 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
     from services.adms_server import ADMSServer
     adms_server = ADMSServer()
 
-    last_event_time = [time.time()]
-
     def on_attendance(sn: str, record: dict):
         """Callback appelé pour chaque pointage reçu."""
         try:
-            last_event_time[0] = time.time()
             pin_str = record.get("pin", "0")
             pin = int(pin_str) if pin_str.isdigit() else 0
             dt_str = record.get("datetime", "")
@@ -82,18 +79,8 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
 
     logging.info("🟢 Monitor ADMS démarré pour %s (attente connexion...)", machine.addresseip)
 
-    EVENT_SILENT_TIMEOUT = 300
-
+    # Boucle de surveillance — vérifie juste que l'appareil reste connecté
     while not stop_evt.is_set():
-        if time.time() - last_event_time[0] >= EVENT_SILENT_TIMEOUT:
-            if adapter.is_connected():
-                logging.warning(
-                    "⚠️ ADMS %s aucun pointage depuis %.0fs mais appareil connecté, "
-                    "on reste en vie",
-                    machine.addresseip,
-                    time.time() - last_event_time[0]
-                )
-
         if adapter.is_connected():
             if not getattr(adapter, "_logged_connected", False):
                 logging.info("✅ ADMS %s connecté (SN=%s)", machine.addresseip, adapter.sn)
@@ -113,8 +100,9 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
                 adapter.last_error = "Connexion perdue (heartbeat timeout)"
                 send_machine_status(machine, adapter)
 
+        # Dormir par tranches pour pouvoir s'arrêter rapidement
         sleep_slice = 1.0 if throttle_event.is_set() else 0.2
-        total = 10 if throttle_event.is_set() else 50
+        total = 10 if throttle_event.is_set() else 50  # 10s de cycle dans les 2 cas
         for _ in range(total):
             if stop_evt.is_set():
                 break
