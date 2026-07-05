@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import threading
 import time
 import logging
@@ -54,7 +55,7 @@ async def _ws_process_response(path, request_headers, response_headers):
     return response_headers
 
 
-async def _ws_handler(ws):
+async def _ws_handler(ws: WebSocketServerProtocol):
     _ws_clients.add(ws)
     authenticated = False
     gym_branch_id = None
@@ -67,14 +68,9 @@ async def _ws_handler(ws):
         authenticated = True
 
     try:
-        async for message in ws:
-            # Handle incoming messages (subscriptions, etc.)
+        async for raw in ws:
             try:
-                data = json.loads(message)
-                print(f"[WebSocket] Received: {data}")
-                if data.get('action') == 'subscribe':
-                    print(
-                        f"[WebSocket] Client subscribed to {data.get('channel')} for gymBranchId: {data.get('gymBranchId')}")
+                data = json.loads(raw)
             except json.JSONDecodeError:
                 print("[WebSocket] JSON invalide: %s", raw[:200])
                 continue
@@ -111,17 +107,17 @@ async def _ws_handler(ws):
     except Exception as e:
         print("[WebSocket] Erreur handler: %s", e)
     finally:
-        _ws_clients.remove(ws)
+        _ws_clients.discard(ws)
+        logger.info("[WebSocket] Client déconnecté (total: %s)", len(_ws_clients))
 
 
 async def _ws_broadcast(payload: dict):
     if _ws_clients:
         msg = json.dumps(payload, ensure_ascii=False)
-        await asyncio.gather(*(ws.send(msg) for ws in _ws_clients), return_exceptions=True)
+        await asyncio.gather(*(ws.send(msg) for ws in _ws_clients.copy()), return_exceptions=True)
 
 
 def _ws_thread():
-    """Thread dédié : crée la loop, la démarre, puis lance le serveur."""
     global _ws_loop
     _ws_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(_ws_loop)
@@ -140,17 +136,14 @@ def _ws_thread():
         _ws_server_ready.set()
         await server.wait_closed()
 
-    # On planifie la coroutine de démarrage, puis on lance la loop.
     _ws_loop.create_task(_start())
     _ws_loop.run_forever()
 
 
 def start_ws_server():
-    """Start the WebSocket server in a separate thread."""
     t = threading.Thread(target=_ws_thread, daemon=True, name="WebSocketThread")
     t.start()
 
-    # on attend que _ws_loop soit créé pour pouvoir diffuser ensuite
     while _ws_loop is None:
         time.sleep(0.05)
 
@@ -159,21 +152,11 @@ def start_ws_server():
 
 
 def broadcast_ws(payload: dict):
-    """Generic broadcast function."""
     if _ws_loop:
         asyncio.run_coroutine_threadsafe(_ws_broadcast(payload), _ws_loop)
 
 
-# === SPECIFIC FUNCTIONS FOR POINTAGE, SESSION, FINGERPRINT ===
-
 def send_pointage(pointage_data: Dict[str, Any], gym_branch_id: str):
-    """
-    Send pointage data to WebSocket clients.
-
-    Args:
-        pointage_data: Dictionary containing pointage information
-        gym_branch_id: Gym branch identifier for filtering clients
-    """
     payload = {
         "type": "pointage",
         "channel": "pointage",
@@ -207,13 +190,6 @@ def send_session(session_data: Dict[str, Any], gym_branch_id: str):
 
 
 def send_fingerprint(fingerprint_data: Dict[str, Any], gym_branch_id: str):
-    """
-    Send fingerprint data to WebSocket clients.
-
-    Args:
-        fingerprint_data: Dictionary containing fingerprint information
-        gym_branch_id: Gym branch identifier for filtering clients
-    """
     payload = {
         "type": "fingerprint",
         "channel": "fingerprint",
@@ -242,12 +218,22 @@ def _ts_value(val) -> Optional[int]:
     return None
 
 
+def _check_tcp(ip: str, port: int, timeout: float = 2.0) -> bool:
+    """Vérifie si un port TCP est joignable (connexion réelle, pas de cache)."""
+    try:
+        sock = socket.create_connection((ip, port), timeout=timeout)
+        sock.close()
+        return True
+    except (OSError, socket.timeout):
+        return False
+
+
 def send_machine_status(machine, adapter, app_version: str = "v1"):
     """Broadcast machine status change to WebSocket clients in real-time."""
     if app_version == "v2":
         connected = adapter.is_connected()
     else:
-        connected = getattr(adapter, "connected", False) or (getattr(adapter, "handle", None) is not None)
+        connected = _check_tcp(machine.addresseip, int(machine.port))
 
     payload = {
         "type": "machine_status_changed",
@@ -268,7 +254,6 @@ def send_machine_status(machine, adapter, app_version: str = "v1"):
             "timestamp": int(time.time())
         }
     }
-    print("[WebSocket] Broadcasting machine status: %s (connected=%s)", machine.alias, connected)
     broadcast_ws(payload)
 
 
@@ -298,10 +283,8 @@ def start_machine_status_broadcast(get_devices_fn, interval: int = 5):
 
 
 def get_connected_clients_count() -> int:
-    """Get the number of currently connected WebSocket clients."""
     return len(_ws_clients)
 
 
 def is_server_running() -> bool:
-    """Check if the WebSocket server is running."""
     return _ws_loop is not None and not _ws_loop.is_closed()
