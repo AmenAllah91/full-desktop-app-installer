@@ -18,6 +18,7 @@ from typing import Optional
 from domain.AccessMachine import AccessMachine
 from services.MachineMonitor import make_rt_json
 from services.websocket import send_pointage, send_machine_status
+from services.common import throttle_event
 from services.http_client import send_pointage as send_pointage_http
 
 
@@ -101,9 +102,11 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
                 send_machine_status(machine, adapter)
 
         # Dormir par tranches pour pouvoir s'arrêter rapidement
-        for _ in range(50):  # 50 * 0.2 = 10 secondes
+        sleep_slice = 1.0 if throttle_event.is_set() else 0.2
+        total = 10 if throttle_event.is_set() else 50  # 10s de cycle dans les 2 cas
+        for _ in range(total):
             if stop_evt.is_set():
                 break
-            time.sleep(0.2)
+            time.sleep(sleep_slice)
 
     logging.warning("🔌 Monitor ADMS arrêté %s", machine.addresseip)
