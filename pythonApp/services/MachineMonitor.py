@@ -2,6 +2,7 @@
 import ctypes
 import json
 import logging
+import socket
 import time
 from ctypes import c_char_p, c_int, c_void_p, create_string_buffer
 from datetime import datetime, timedelta
@@ -40,6 +41,15 @@ def is_c3_handle_connected(handle: Optional[c_void_p]) -> bool:
         return ret >= 0
     except Exception as e:
         logging.debug(f"Connection test failed: {e}")
+        return False
+
+
+def check_device_tcp(ip: str, port: str, timeout: float = 2.0) -> bool:
+    try:
+        sock = socket.create_connection((ip, int(port)), timeout=timeout)
+        sock.close()
+        return True
+    except (OSError, socket.timeout):
         return False
 
 
@@ -114,8 +124,10 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
     last_successful_read = datetime.now()
     READ_TIMEOUT = 300
 
+    EVENT_SILENT_TIMEOUT = 180
+    last_event_time = time.time()
+
     def _clean_exit(connected: bool = False, error: str = ""):
-        """Nettoie le handle et broadcast le status final avant de sortir."""
         with ctx.lock:
             if ctx.handle:
                 try:
@@ -131,9 +143,21 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
 
     while not stop_evt.is_set():
         now = datetime.now()
+        current_ts = time.time()
+
+        if current_ts - last_event_time >= EVENT_SILENT_TIMEOUT:
+            logging.error(
+                "💀 C3 %s aucun événement depuis %.0fs (timeout=%ss), "
+                "arrêt thread pour redémarrage watchdog",
+                ip, current_ts - last_event_time, EVENT_SILENT_TIMEOUT
+            )
+            _clean_exit(connected=False, error=f"Silence événements ({EVENT_SILENT_TIMEOUT}s)")
+            return
 
         if now - last_check_time > timedelta(seconds=CONNECTION_CHECK_INTERVAL):
-            if ctx.handle and not is_c3_handle_connected(ctx.handle):
+            tcp_ok = check_device_tcp(ip, port)
+
+            if tcp_ok and ctx.handle and not is_c3_handle_connected(ctx.handle):
                 consecutive_failures += 1
                 ctx.adapter.connected = False
                 logging.warning(
@@ -142,6 +166,13 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 if consecutive_failures >= max_consecutive_failures:
                     logging.error(f"🚨 C3 {ip} connexion perdue, le thread va s'arrêter (watchdog relancera)")
                     _clean_exit(connected=False, error=f"Perte de connexion après {consecutive_failures} échecs")
+                    return
+            elif not tcp_ok:
+                logging.warning(f"⚠️ C3 {ip} TCP injoignable (socket check)")
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    logging.error(f"🚨 C3 {ip} TCP injoignable pendant {consecutive_failures} cycles, arrêt")
+                    _clean_exit(connected=False, error=f"TCP injoignable ({consecutive_failures} cycles)")
                     return
             else:
                 consecutive_failures = 0
@@ -170,6 +201,10 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 time.sleep(1)
                 continue
 
+        if not check_device_tcp(ip, port):
+            time.sleep(1)
+            continue
+
         try:
             ret = pl.GetRTLog(ctx.handle, buf, BUF_SZ)
             if ret > 0:
@@ -179,6 +214,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 if not is_event(raw):
                     continue
 
+                last_event_time = time.time()
                 pin, dt, state, door_id, card_no = parse_c3_line(raw)
 
                 if door_id == 1:
@@ -274,8 +310,8 @@ def parse_c3_line(raw: str):
         card_no = f[2] if f[2] != "0" else None
         door_id = int(f[3])
         event_type = int(f[4])
-        entry_exit_status = int(f[5])  # si besoin
-        verification_mode = int(f[6])  # si besoin
+        entry_exit_status = int(f[5])
+        verification_mode = int(f[6])
 
         return pin, dt, event_type, door_id, card_no
     except (ValueError, IndexError) as e:
