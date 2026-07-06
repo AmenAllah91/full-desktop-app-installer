@@ -11,7 +11,7 @@ from services.websocket import send_pointage, send_machine_status
 
 
 # ------------------------------------------------------------------ #
-# Helper : détection robuste d'un comKey valide
+# Helper : detection robuste d'un comKey valide
 # ------------------------------------------------------------------ #
 def has_comkey(value) -> bool:
     if value is None:
@@ -29,18 +29,16 @@ def has_comkey(value) -> bool:
 # Helper : lecture compatible GetLastError (v1 ou v2)
 # ------------------------------------------------------------------ #
 def zkem_last_error(zk) -> Union[int, str]:
-    """
-    Lecture robuste du code d'erreur, toutes versions SDK.
-    """
-    try:                                    # firmware récent
+    try:
         return int(zk.GetLastError())
     except (TypeError, pywintypes.com_error):
         err = ctypes.c_long()
-        try:                                # firmware ancien
+        try:
             zk.GetLastError(err)
             return err.value
         except Exception:
             return "?"
+
 
 # ------------------------------------------------------------------ #
 # 1) Classe réceptrice d'événements COM
@@ -51,13 +49,13 @@ class ZkemEvents:
         self.m = m
         self.tenant = tenant
         self.gym_branch_id = gym_branch_id
-        # Ici tu peux créer le producer Kafka UNE SEULE FOIS pour l'instance
         from os import getenv
-        # self.kafka = KafkaService(getenv("KAFKA_BROKER"), f"group_rt_{tenant}")
+        self.last_event_time = time.time()
 
     def OnAttTransactionEx(self, enroll, is_invalid,
                            state, verify,
                            Y, M, D, h, m, s, workcode):
+        self.last_event_time = time.time()
         ts = datetime(Y, M, D, h, m, s).strftime("%Y-%m-%d %H:%M:%S")
         payload = make_rt_json(
             machine_id = self.m.id,
@@ -89,17 +87,14 @@ class ZkemEvents:
 
 
 # ------------------------------------------------------------------ #
-# 2) Thread de surveillance temps-réel — version sans conflit
+# 2) Thread de surveillance temps-réel — version robuste
 # ------------------------------------------------------------------ #
 def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                  machine_number: int = 1, stop_evt=None,
                  tenant: str = "empire", gym_branch_id: str = "0"):
     pythoncom.CoInitialize()
+    base = None
     try:
-        # gencache.EnsureDispatch (et non Dispatch) est indispensable ici :
-        # WithEvents ne peut pas lier OnAttTransactionEx sur un objet en
-        # dispatch dynamique — la connexion et RegEvent réussissent quand
-        # même, mais aucun événement temps réel n'est jamais reçu.
         try:
             base = win32com.client.gencache.EnsureDispatch("zkemkeeper.ZKEM")
         except Exception as ex:
@@ -132,6 +127,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             return _Events
 
         EventCls = _build_event_class(machine, ip, tenant, gym_branch_id)
+        events_instance = EventCls()
         win32com.client.WithEvents(base, EventCls)
 
         EVENT_MASK = 0xFFFF
@@ -157,6 +153,10 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
 
         _zk_check_interval = 10
         _zk_last_check = time.time()
+        _zk_last_event_check = time.time()
+        _zk_reg_event_interval = 300
+        _zk_last_reg_event = time.time()
+        _zk_event_timeout = 120
 
         while stop_evt is None or not stop_evt.is_set():
             now = time.time()
@@ -179,12 +179,61 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                         pass
                     break
 
+            if now - _zk_last_event_check >= _zk_event_timeout:
+                _zk_last_event_check = now
+                if hasattr(events_instance, 'last_event_time'):
+                    elapsed_since_event = now - events_instance.last_event_time
+                    if elapsed_since_event >= _zk_event_timeout:
+                        logging.error(
+                            "💀 ZKEM %s aucun événement reçu depuis %.0fs (timeout=%ss), "
+                            "arrêt thread pour redémarrage watchdog",
+                            ip, elapsed_since_event, _zk_event_timeout
+                        )
+                        try:
+                            from services.DeviceMAnager import DeviceManager
+                            ctx = DeviceManager.get(machine.id)
+                            if ctx:
+                                ctx.adapter.connected = False
+                                ctx.adapter.offline_since = time.time()
+                                ctx.adapter.last_error = f"Aucun événement depuis {elapsed_since_event:.0f}s"
+                                send_machine_status(machine, ctx.adapter)
+                        except Exception:
+                            pass
+                        break
+
+            if now - _zk_last_reg_event >= _zk_reg_event_interval:
+                _zk_last_reg_event = now
+                try:
+                    if not base.RegEvent(machine_number, EVENT_MASK):
+                        err = zkem_last_error(base)
+                        logging.warning("⚠️ ZKEM %s renouvellement RegEvent échoué err=%s, arrêt", ip, err)
+                        try:
+                            from services.DeviceMAnager import DeviceManager
+                            ctx = DeviceManager.get(machine.id)
+                            if ctx:
+                                ctx.adapter.connected = False
+                                ctx.adapter.offline_since = time.time()
+                                ctx.adapter.last_error = f"RegEvent renouvellement échoué: {err}"
+                                send_machine_status(machine, ctx.adapter)
+                        except Exception:
+                            pass
+                        break
+                    logging.info("♻️ ZKEM %s RegEvent renouvelé", ip)
+                except Exception as ex:
+                    logging.error("💥 ZKEM %s exception pendant renouvellement RegEvent: %s", ip, ex)
+                    break
+
             pythoncom.PumpWaitingMessages()
             time.sleep(0.05)
     finally:
-        try:
-            base.Disconnect()
-        except Exception:
-            pass
+        if base is not None:
+            try:
+                base.RegEvent(machine_number, 0)
+            except Exception:
+                pass
+            try:
+                base.Disconnect()
+            except Exception:
+                pass
         pythoncom.CoUninitialize()
         logging.warning("🔌 RTLog ZKEM déconnecté %s", ip)

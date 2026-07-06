@@ -136,7 +136,8 @@ class MachineWatchdog:
 
     BASE_DELAY = 5
     MAX_DELAY  = 120
-    CHECK_INTERVAL = 10  # secondes entre chaque vérification
+    CHECK_INTERVAL = 10
+    ZOMBIE_TIMEOUT = 300
 
     def __init__(self):
         # { machine_id: { "thread": Thread, "factory": callable, "delay": int } }
@@ -165,6 +166,19 @@ class MachineWatchdog:
         self._watcher.start()
         logging.info("🐕 Watchdog démarré")
 
+    def _get_adapter(self, machine_id: int):
+        ctx = DeviceManager.get(machine_id)
+        if ctx:
+            return ctx.adapter
+        try:
+            from services.v2.device_manager_v2 import DeviceManagerV2
+            ctx2 = DeviceManagerV2.get(machine_id)
+            if ctx2:
+                return ctx2.adapter
+        except Exception:
+            pass
+        return None
+
     def _watch_loop(self) -> None:
         while not stop_event_monitoring.is_set():
             time.sleep(self.CHECK_INTERVAL)
@@ -173,14 +187,36 @@ class MachineWatchdog:
                 if stop_event_monitoring.is_set():
                     break
 
-                if not entry["thread"].is_alive():
-                    delay = entry["delay"]
-                    logging.error(
-                        "💀 [Watchdog] Thread mort — machine %s, "
-                        "redémarrage dans %ss", mid, delay
-                    )
+                thread = entry["thread"]
+                thread_alive = thread.is_alive()
+                is_zombie = False
 
-                    # Sleep interruptible
+                if thread_alive:
+                    adapter = self._get_adapter(mid)
+                    if adapter is not None and adapter.last_seen is not None:
+                        elapsed = time.time() - adapter.last_seen
+                        if elapsed >= self.ZOMBIE_TIMEOUT:
+                            is_zombie = True
+                            logging.error(
+                                "🧟 [Watchdog] Thread ZOMBIE — machine %s, "
+                                "dernier événement il y a %.0fs (seuil=%ss)",
+                                mid, elapsed, self.ZOMBIE_TIMEOUT
+                            )
+
+                if not thread_alive or is_zombie:
+                    delay = entry["delay"]
+
+                    if not thread_alive:
+                        logging.error(
+                            "💀 [Watchdog] Thread mort — machine %s, "
+                            "redémarrage dans %ss", mid, delay
+                        )
+                    else:
+                        logging.error(
+                            "🧟 [Watchdog] Redémarrage thread zombie — "
+                            "machine %s dans %ss", mid, delay
+                        )
+
                     elapsed = 0
                     while elapsed < delay and not stop_event_monitoring.is_set():
                         time.sleep(1)
@@ -189,17 +225,20 @@ class MachineWatchdog:
                     if stop_event_monitoring.is_set():
                         break
 
+                    if thread_alive and is_zombie:
+                        logging.info(
+                            "🪦 [Watchdog] Attente arrêt ancien thread zombie %s...", mid
+                        )
+
                     new_thread = entry["factory"]()
                     new_thread.start()
                     entry["thread"] = new_thread
-                    # Backoff exponentiel, reset à BASE_DELAY au prochain succès
                     entry["delay"] = min(delay * 2, self.MAX_DELAY)
                     logging.info(
                         "♻️ [Watchdog] Thread redémarré — machine %s (%s)",
                         mid, new_thread.name
                     )
                 else:
-                    # Thread vivant → reset du backoff
                     entry["delay"] = self.BASE_DELAY
 
         logging.info("🛑 [Watchdog] Arrêté")
