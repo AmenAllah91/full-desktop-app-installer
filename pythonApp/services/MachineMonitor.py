@@ -13,6 +13,7 @@ from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceContext
 from services.addAndAuthorizeUser import connect_to_device
 from services.websocket import send_pointage, send_machine_status_from_ctx
+from services.common import throttle_event
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 if not PLCOMPRO_URL:
@@ -111,7 +112,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
     consecutive_failures = 0
     max_consecutive_failures = 2
     last_successful_read = datetime.now()
-    READ_TIMEOUT = 30
+    READ_TIMEOUT = 300
 
     def _clean_exit(connected: bool = False, error: str = ""):
         """Nettoie le handle et broadcast le status final avant de sortir."""
@@ -215,7 +216,8 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 logging.info("📡 %s → %s", ip, payload)
 
             elif ret == 0:
-                time.sleep(0.2)
+                last_successful_read = datetime.now()
+                time.sleep(2.0 if throttle_event.is_set() else 0.2)
             else:
                 logging.warning(f"GetRTLog returned error {ret} for {ip}")
                 _clean_exit(connected=False, error=f"GetRTLog error: {ret}")

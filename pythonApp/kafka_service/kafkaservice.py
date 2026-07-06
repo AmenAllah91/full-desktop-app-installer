@@ -24,20 +24,17 @@ class KafkaService:
 
     def produce(self, topic: str, message):
         """Send a message to the specified Kafka topic."""
-        # def delivery_report(err, msg):
-        #     if err is not None:
-        #         print(f"Message delivery failed: {err}")
-        #     else:
-        #         print(f"Message delivered to {msg.topic()} [{msg.partition()}]")
-
-        # Convert the message to JSON string if it's a dictionary and the topic is not 'rt_fingerprint_capture'
         json_message = json.dumps(message) if isinstance(message, dict) else str(message)
 
-        # Send the message asynchronously
-        self.producer.produce(topic, value=json_message, callback=None)
+        def delivery_report(err, msg):
+            if err is not None:
+                logger.error("Kafka delivery failed to %s: %s", topic, err)
 
-        # Periodically poll to trigger delivery callbacks
-        self.producer.poll(0)
+        try:
+            self.producer.produce(topic, value=json_message, callback=delivery_report)
+            self.producer.poll(0)
+        except Exception as e:
+            logger.error("Kafka produce exception for topic %s: %s", topic, e)
 
     def consume(self, topic: str, on_message):
         """Listen to messages from the specified Kafka topic and process them using a callback."""
