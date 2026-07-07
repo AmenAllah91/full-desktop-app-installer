@@ -64,9 +64,9 @@ def initialize_env_file():
     """Initialize the .env file with default values if it doesn't exist."""
     if not os.path.exists(ENV_FILE_PATH):
         default_env_content = """# .env
-KAFKA_BROKER=51.178.55.238:9094
+KAFKA_BROKER=54.38.35.221:9094
 KAFKA_GROUP_ID=group_c
-KAFKA_TOPIC=rt_
+KAFKA_TOPIC=rt_pointage
 GYM_BRANCH_ID=0
 
 FLASK_HOST=0.0.0.0
@@ -93,6 +93,7 @@ load_dotenv(dotenv_path=ENV_FILE_PATH)
 initialize_env_file()
 
 KafkaBroker = os.getenv("KAFKA_BROKER")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "rt_pointage")
 
 # Flask application initialization
 app = Flask(__name__)
@@ -582,6 +583,14 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
 
 
 def start_kafka_consumers():
+    topics = [
+        f'new_access_request_{tenant}',
+        TOPIC_CONSUME_PUBLISH_PHOTO,
+        f'fingerprint_actions_{tenant}',
+    ]
+    for topic in topics:
+        pointage_kafka.ensure_topic(topic)
+
     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
     fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
@@ -1098,10 +1107,11 @@ def open_door_api():
                 card_no=None,
                 gym_branch_id=gym_branch_id,
                 porte_type=porte_type,
+                tenant=tenant,
             )
 
             payload = json.loads(payload_json)
-            kafka.produce("rt_" + tenant, payload)
+            kafka.produce(KAFKA_TOPIC, payload)
             send_pointage(payload, gym_branch_id)
 
         except Exception as ex:
