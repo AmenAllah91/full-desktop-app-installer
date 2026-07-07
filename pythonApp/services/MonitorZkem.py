@@ -72,7 +72,7 @@ class ZkemEvents:
         print(payload)
         # self.kafka.produce("rt_" + self.tenant, payload)
         try:
-            send_pointage(json.loads(payload), "1003")
+            send_pointage(json.loads(payload), self.gym_branch_id)
         except Exception as ex:
             print("[WebSocket] Erreur envoi WS: %s", ex)
 
