@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 from confluent_kafka import Producer, Consumer, KafkaException, KafkaError
+from confluent_kafka.admin import AdminClient, NewTopic
 import time
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,24 @@ class KafkaService:
             'session.timeout.ms': 60000,  # Increase session timeout
             'max.poll.interval.ms': 300000
         })
+        self._admin = AdminClient({'bootstrap.servers': kafka_broker})
+        self._broker = kafka_broker
+
+    def ensure_topic(self, topic: str, num_partitions: int = 1, replication_factor: int = 1):
+        """Create the topic if it does not already exist on the broker."""
+        try:
+            metadata = self._admin.list_topics(timeout=5)
+            if topic in metadata.topics:
+                return
+            futures = self._admin.create_topics([
+                NewTopic(topic, num_partitions=num_partitions, replication_factor=replication_factor)
+            ])
+            futures[topic].result(timeout=10)
+            logger.info("Topic '%s' created successfully", topic)
+        except Exception as e:
+            if "TOPIC_ALREADY_EXISTS" in str(e):
+                return
+            logger.warning("Could not create topic '%s': %s", topic, e)
 
     def produce(self, topic: str, message):
         """Send a message to the specified Kafka topic."""
