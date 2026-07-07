@@ -76,7 +76,7 @@ class ZkemEvents:
         logging.info(payload)
         self.kafka.produce(KAFKA_TOPIC, payload)
         try:
-            send_pointage(json.loads(payload), "1003")
+            send_pointage(json.loads(payload), self.gym_branch_id)
         except Exception as ex:
             logging.error("[WebSocket] Erreur envoi WS: %s", ex)
 
