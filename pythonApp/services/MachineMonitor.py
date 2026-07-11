@@ -28,6 +28,7 @@ pl.GetRTLog.argtypes = [c_void_p, c_char_p, c_int]
 pl.GetRTLog.restype = c_int
 
 kafka = KafkaService(getenv("KAFKA_BROKER"), "rt_c3_group")
+KAFKA_POINTAGE_TOPIC = getenv("KAFKA_TOPIC", "rt_pointage")
 
 ACCESS_GRANTED = {0}
 
@@ -239,9 +240,10 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                     card_no=card_no,
                     gym_branch_id=BRANCH_ID,
                     porte_type=porte.value,
+                    tenant=TENANT,
                 )
 
-                kafka.produce("rt_" + TENANT, payload)
+                kafka.produce(KAFKA_POINTAGE_TOPIC, payload)
                 try:
                     send_pointage(json.loads(payload), BRANCH_ID)
                 except Exception as ex:
@@ -280,6 +282,7 @@ def make_rt_json(
     card_no: Optional[str],
     gym_branch_id: str,
     porte_type: str,
+    tenant: str = "",
 ) -> str:
     payload = {
         "id_machine": machine_id,
@@ -292,6 +295,7 @@ def make_rt_json(
         "gym_branch_id": gym_branch_id,
         "cardNo": card_no or "",
         "porte_type": porte_type,
+        "tenant": tenant,
     }
     return json.dumps(payload, ensure_ascii=False)
 

@@ -18,6 +18,7 @@ from os import getenv
 from typing import Optional
 
 from domain.AccessMachine import AccessMachine
+from config import KAFKA_TOPIC
 from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
 from services.websocket import send_pointage, send_machine_status
@@ -71,9 +72,10 @@ def setup_attendance_callback(adms_server: ADMSServerV2,
                 card_no=None,
                 gym_branch_id=gym_branch_id,
                 porte_type=machine.porte_type or "ENTREE",
+                tenant=tenant,
             )
 
-            kafka.produce(f"rt_{tenant}", payload)
+            kafka.produce(KAFKA_TOPIC, payload)
 
             try:
                 send_pointage(json.loads(payload), gym_branch_id)

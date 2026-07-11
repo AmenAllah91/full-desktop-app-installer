@@ -48,6 +48,7 @@ from services.logger import setup_logging
 ADMS_PORT = 8088
 FLASK_API_PORT = 9998
 WS_PORT = 8765
+KAFKA_POINTAGE_TOPIC = os.getenv("KAFKA_TOPIC", "rt_pointage")
 
 setup_logging()
 logger = logging.getLogger("ADMS-Bridge")
@@ -93,6 +94,36 @@ class KafkaService:
         self.group_id = group_id
         self._producer = None
         self._consumer = None
+        self._admin = None
+
+    def _get_admin(self):
+        if self._admin is None:
+            try:
+                from confluent_kafka.admin import AdminClient, NewTopic
+                self._admin = AdminClient({"bootstrap.servers": self.broker})
+            except ImportError:
+                logger.warning("confluent_kafka.admin non disponible")
+                return None
+        return self._admin
+
+    def ensure_topic(self, topic: str, num_partitions: int = 1, replication_factor: int = 1):
+        admin = self._get_admin()
+        if admin is None:
+            return
+        try:
+            metadata = admin.list_topics(timeout=5)
+            if topic in metadata.topics:
+                return
+            from confluent_kafka.admin import NewTopic
+            futures = admin.create_topics([
+                NewTopic(topic, num_partitions=num_partitions, replication_factor=replication_factor)
+            ])
+            futures[topic].result(timeout=10)
+            logger.info("Topic '%s' created successfully", topic)
+        except Exception as e:
+            if "TOPIC_ALREADY_EXISTS" in str(e):
+                return
+            logger.warning("Could not create topic '%s': %s", topic, e)
 
     def _get_producer(self):
         if self._producer is None:
@@ -639,8 +670,9 @@ class ADMSBridge:
                         "gym_branch_id": str(self.gym_branch_id),
                         "cardNo": "",
                         "porte_type": porte_type,
+                        "tenant": self.tenant,
                     }
-                    self.kafka.produce(f"rt_{self.tenant}", payload)
+                    self.kafka.produce(KAFKA_POINTAGE_TOPIC, payload)
                     send_pointage(payload, str(self.gym_branch_id))
                 except Exception as ex:
                     logger.error("Erreur envoi pointage manuel: %s", ex)
@@ -856,10 +888,11 @@ class ADMSBridge:
                 "gym_branch_id": str(self.gym_branch_id),
                 "cardNo": "",
                 "porte_type": device.porte_type,
+                "tenant": self.tenant,
             }
 
             if self.kafka:
-                self.kafka.produce(f"rt_{self.tenant}", payload)
+                self.kafka.produce(KAFKA_POINTAGE_TOPIC, payload)
 
             send_pointage(payload, str(self.gym_branch_id))
 
@@ -993,6 +1026,11 @@ class ADMSBridge:
 
         # Kafka consumers
         if self.kafka:
+            for svc, t in [
+                (self.pointage_kafka, f"new_access_request_{self.tenant}"),
+                (self.fingerprint_kafka, f"fingerprint_actions_{self.tenant}"),
+            ]:
+                svc.ensure_topic(t)
             threading.Thread(
                 target=self._consume_access_requests, daemon=True, name="KafkaAccessThread"
             ).start()
@@ -1025,7 +1063,7 @@ if __name__ == "__main__":
     tenant = sys.argv[1]
     gym_branch_id = sys.argv[2]
 
-    kafka_broker = os.getenv("KAFKA_BROKER", "51.178.55.238:9094")
+    kafka_broker = os.getenv("KAFKA_BROKER", "54.38.35.221:9094")
 
     bridge = ADMSBridge(
         tenant=tenant,
