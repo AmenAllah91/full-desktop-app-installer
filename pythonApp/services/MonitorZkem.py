@@ -77,7 +77,7 @@ class ZkemEvents:
             print("[WebSocket] Erreur envoi WS: %s", ex)
 
         try:
-            from services.DeviceMAnager import DeviceManager
+            from services.DeviceManager import DeviceManager
             ctx = DeviceManager.get(self.m.id)
             if ctx:
                 ctx.adapter.event_count += 1
@@ -139,7 +139,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
 
         logging.info("🟢 RTLog ZKEM connecté %s:%s", ip, port)
         try:
-            from services.DeviceMAnager import DeviceManager
+            from services.DeviceManager import DeviceManager
             ctx = DeviceManager.get(machine.id)
             if ctx:
                 ctx.adapter.connected = True
@@ -168,7 +168,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                 except (OSError, socket.timeout):
                     logging.warning("⚠️ ZKEM %s:%s injoignable, arrêt du thread (watchdog relancera)", ip, port)
                     try:
-                        from services.DeviceMAnager import DeviceManager
+                        from services.DeviceManager import DeviceManager
                         ctx = DeviceManager.get(machine.id)
                         if ctx:
                             ctx.adapter.connected = False
@@ -190,7 +190,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                             ip, elapsed_since_event, _zk_event_timeout
                         )
                         try:
-                            from services.DeviceMAnager import DeviceManager
+                            from services.DeviceManager import DeviceManager
                             ctx = DeviceManager.get(machine.id)
                             if ctx:
                                 ctx.adapter.connected = False
@@ -208,7 +208,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
                         err = zkem_last_error(base)
                         logging.warning("⚠️ ZKEM %s renouvellement RegEvent échoué err=%s, arrêt", ip, err)
                         try:
-                            from services.DeviceMAnager import DeviceManager
+                            from services.DeviceManager import DeviceManager
                             ctx = DeviceManager.get(machine.id)
                             if ctx:
                                 ctx.adapter.connected = False
