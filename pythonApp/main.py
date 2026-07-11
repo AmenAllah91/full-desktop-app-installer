@@ -1286,13 +1286,12 @@ def wait_for_angular(host="127.0.0.1", port=4200, timeout=120):
                 return False
             time.sleep(1)
 if __name__ == '__main__':
- # TODO: remove comments
-    # spring_thread = threading.Thread(target=start_spring)
-    # spring_thread.start()
-    # angular_thread = threading.Thread(target=start_angular)
-    # angular_thread.start()
-    # angular_thread.join()
-    # spring_thread.join()
+    spring_thread = threading.Thread(target=start_spring)
+    spring_thread.start()
+    angular_thread = threading.Thread(target=start_angular)
+    angular_thread.start()
+    angular_thread.join()
+    spring_thread.join()
     # threading.Thread(target=angular_watchdog).start()
 
     def handle_sigterm(signum, frame):
