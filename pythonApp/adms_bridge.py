@@ -6,7 +6,7 @@ ZKTeco SpeedFace-V3L en mode PUSH (protocole ADMS).
 
 Architecture:
   - L'appareil PUSH se connecte à ce serveur HTTP
-  - Les pointages arrivent en temps réel et sont envoyés sur Kafka + WebSocket
+  - Les pointages arrivent en temps réel et sont envoyés sur HTTP (Spring Boot) + WebSocket
   - Les commandes (add_user, delete, open_door...) sont mises en queue
     et envoyées à l'appareil via le heartbeat /iclock/getrequest
   - Compatible avec l'API REST existante de YoGym
@@ -85,71 +85,6 @@ class DeviceInfo:
     machine_id: Optional[int] = None
     alias: str = ""
     porte_type: str = "ENTREE"
-
-
-# ============================================================
-# Kafka Service
-# ============================================================
-class KafkaService:
-    def __init__(self, broker: str, group_id: str):
-        self.broker = broker
-        self.group_id = group_id
-        self._producer = None
-        self._consumer = None
-
-    def _get_producer(self):
-        if self._producer is None:
-            try:
-                from confluent_kafka import Producer
-                self._producer = Producer({"bootstrap.servers": self.broker})
-            except ImportError:
-                logger.warning("confluent_kafka non installé, Kafka désactivé")
-                return None
-        return self._producer
-
-    def produce(self, topic: str, message):
-        p = self._get_producer()
-        if p is None:
-            logger.debug("Kafka skip (non configuré): %s", topic)
-            return
-        json_msg = json.dumps(message) if isinstance(message, dict) else str(message)
-        p.produce(topic, value=json_msg)
-        p.poll(0)
-
-    def consume(self, topic: str, on_message, stop_evt: threading.Event = None):
-        try:
-            from confluent_kafka import Consumer, KafkaError
-        except ImportError:
-            logger.warning("confluent_kafka non installé")
-            return
-
-        consumer = Consumer({
-            "bootstrap.servers": self.broker,
-            "group.id": self.group_id,
-            "auto.offset.reset": "earliest",
-            "session.timeout.ms": 60000,
-            "max.poll.interval.ms": 300000,
-        })
-        consumer.subscribe([topic])
-        logger.info("Kafka: écoute sur '%s'", topic)
-
-        try:
-            while stop_evt is None or not stop_evt.is_set():
-                msg = consumer.poll(1.0)
-                if msg is None:
-                    continue
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    logger.error("Kafka error: %s", msg.error())
-                    time.sleep(1)
-                    continue
-                try:
-                    on_message(msg.value().decode("utf-8"))
-                except Exception as e:
-                    logger.error("Kafka message processing error: %s", e)
-        finally:
-            consumer.close()
 
 
 # ============================================================
@@ -409,7 +344,7 @@ class ADMSBridge:
     Gère la communication bidirectionnelle avec les appareils ZKTeco en mode PUSH.
     """
 
-    def __init__(self, tenant: str, gym_branch_id: str, kafka_broker: str = None):
+    def __init__(self, tenant: str, gym_branch_id: str):
         self.tenant = tenant
         self.gym_branch_id = gym_branch_id
         self.stop_event = threading.Event()
@@ -434,14 +369,6 @@ class ADMSBridge:
 
         self.cmd_queue = CommandQueue(db_path)
         self.cmd_queue.reload_pending()
-
-        # Kafka
-        self.kafka = None
-        if kafka_broker:
-            self.kafka = KafkaService(kafka_broker, f"adms_bridge_{gym_branch_id}")
-            self.pointage_kafka = KafkaService(kafka_broker, f"pointage_group{gym_branch_id}")
-            self.fingerprint_kafka = KafkaService(kafka_broker, f"fingerprint_group{gym_branch_id}")
-            self.photo_kafka = KafkaService(kafka_broker, f"photo_group{gym_branch_id}")
 
         # Flask apps
         self.adms_app = self._create_adms_app()
@@ -627,8 +554,8 @@ class ADMSBridge:
                 "duration": duration,
             })
 
-            # Envoyer pointage sur Kafka si pin fourni
-            if pin and self.kafka:
+            # Envoyer pointage si pin fourni
+            if pin:
                 try:
                     now = datetime.now()
                     payload = {
@@ -643,12 +570,32 @@ class ADMSBridge:
                         "cardNo": "",
                         "porte_type": porte_type,
                     }
-                    self.kafka.produce(f"rt_{self.tenant}", payload)
                     send_pointage(payload, str(self.gym_branch_id))
+                    from services.http_client import send_pointage as send_pointage_http
+                    send_pointage_http(payload, data["machineId"])
                 except Exception as ex:
                     logger.error("Erreur envoi pointage manuel: %s", ex)
 
             return jsonify({"status": "OK", "machineId": data["machineId"], "duration": duration})
+
+        # ---- Fingerprint actions (from Spring Boot) ----
+        @app.route("/fingerprint/actions", methods=["POST"])
+        def fingerprint_actions():
+            data = request.get_json(force=True)
+            if not data or "pin" not in data or "operation" not in data:
+                abort(400, "pin et operation requis")
+
+            results = {}
+            for sn in self.devices:
+                self.cmd_queue.add_task(sn, {
+                    "operation": data["operation"],
+                    "user_pin": str(data["pin"]),
+                    "finger_id": data.get("finger_id", 0),
+                    "fingerprint_template": data.get("fingerprint_template", ""),
+                })
+                results[sn] = "QUEUED"
+
+            return jsonify({"status": "queued", "results": results}), 201
 
         # ---- Face upload compatible ----
         @app.route("/face/upload", methods=["POST"])
@@ -821,7 +768,7 @@ class ADMSBridge:
         return None
 
     def _handle_attendance(self, sn: str, body: str):
-        """Parse les pointages ATTLOG et envoie sur Kafka + WebSocket."""
+        """Parse les pointages ATTLOG et envoie sur HTTP + WebSocket."""
         for line in body.strip().split("\n"):
             parts = line.strip().split("\t")
             if len(parts) < 2:
@@ -846,7 +793,7 @@ class ADMSBridge:
 
             logger.info("📋 POINTAGE: PIN=%s, Date=%s, Status=%s, Verify=%s", pin, dt_str, status, verify)
 
-            # Envoi Kafka
+            # Envoi HTTP + WebSocket
             device = self.devices.get(sn, DeviceInfo(sn=sn))
             payload = {
                 "id_machine": device.machine_id or 0,
@@ -861,10 +808,9 @@ class ADMSBridge:
                 "porte_type": device.porte_type,
             }
 
-            if self.kafka:
-                self.kafka.produce(f"rt_{self.tenant}", payload)
-
             send_pointage(payload, str(self.gym_branch_id))
+            from services.http_client import send_pointage as send_pointage_http
+            send_pointage_http(payload, device.machine_id or 0)
 
     def _handle_operlog(self, sn: str, body: str):
         for line in body.strip().split("\n"):
@@ -877,14 +823,20 @@ class ADMSBridge:
         size = request.args.get("size", "0")
         logger.info("📸 PHOTO [%s]: PIN=%s, %s bytes", sn, pin, size)
 
-        # Publier sur Kafka si configuré
-        if self.kafka and len(body) > 0:
+        if len(body) > 0:
             try:
                 photo_b64 = base64.b64encode(body.encode("latin-1")).decode("utf-8")
-                self.photo_kafka.produce("finish_publish_photo", {
-                    "userPin": pin,
-                    "photo": photo_b64,
-                })
+                device = self.devices.get(sn, DeviceInfo(sn=sn))
+                from services.http_client import send_photo
+                send_photo(
+                    pin=pin,
+                    photo_b64=photo_b64,
+                    machine_id=device.machine_id or 0,
+                    gym_branch_id=str(self.gym_branch_id),
+                    addresseip=device.ip,
+                    port=8088,
+                    machine_type="PUSH_AC",
+                )
             except Exception as e:
                 logger.error("Erreur publication photo: %s", e)
 
@@ -911,74 +863,6 @@ class ADMSBridge:
             logger.error("Parse cmd result error: %s (%s)", e, body[:100])
 
     # --------------------------------------------------------
-    # Kafka consumers
-    # --------------------------------------------------------
-    def _consume_access_requests(self):
-        """Consomme les messages Kafka new_access_request_{tenant}."""
-        if not self.kafka:
-            return
-
-        def on_message(msg):
-            try:
-                data = json.loads(msg)
-                if str(data.get("gymBranchId")) != str(self.gym_branch_id):
-                    return
-
-                for machine in data.get("machines", []):
-                    sn = self._find_sn_for_machine(machine.get("id"))
-                    if not sn:
-                        for s in self.devices:
-                            sn = s
-                            break
-                    if sn:
-                        self.cmd_queue.add_task(sn, {
-                            "operation": data["operation"],
-                            "user_pin": data["userPin"],
-                            "user_name": data.get("username", ""),
-                            "card_no": data.get("cardNo", ""),
-                            "start_date": data.get("startDate", ""),
-                            "end_date": data.get("endDate", ""),
-                        })
-            except Exception as e:
-                logger.error("Kafka access request error: %s", e)
-
-        while not self.stop_event.is_set():
-            try:
-                self.pointage_kafka.consume(
-                    f"new_access_request_{self.tenant}", on_message, self.stop_event
-                )
-            except Exception as e:
-                logger.error("Kafka consumer error: %s", e)
-                time.sleep(5)
-
-    def _consume_fingerprint_actions(self):
-        """Consomme les messages Kafka fingerprint_actions_{tenant}."""
-        if not self.kafka:
-            return
-
-        def on_message(msg):
-            try:
-                data = json.loads(msg)
-                for sn in self.devices:
-                    self.cmd_queue.add_task(sn, {
-                        "operation": data["operation"],
-                        "user_pin": data["pin"],
-                        "finger_id": data.get("finger_id", 0),
-                        "fingerprint_template": data.get("fingerprint_template", ""),
-                    })
-            except Exception as e:
-                logger.error("Kafka fingerprint error: %s", e)
-
-        while not self.stop_event.is_set():
-            try:
-                self.fingerprint_kafka.consume(
-                    f"fingerprint_actions_{self.tenant}", on_message, self.stop_event
-                )
-            except Exception as e:
-                logger.error("Kafka fingerprint consumer error: %s", e)
-                time.sleep(5)
-
-    # --------------------------------------------------------
     # Start
     # --------------------------------------------------------
     def start(self):
@@ -993,15 +877,6 @@ class ADMSBridge:
 
         # WebSocket
         start_ws_server()
-
-        # Kafka consumers
-        if self.kafka:
-            threading.Thread(
-                target=self._consume_access_requests, daemon=True, name="KafkaAccessThread"
-            ).start()
-            threading.Thread(
-                target=self._consume_fingerprint_actions, daemon=True, name="KafkaFingerprintThread"
-            ).start()
 
         # API Flask (port 9998)
         threading.Thread(
@@ -1028,12 +903,9 @@ if __name__ == "__main__":
     tenant = sys.argv[1]
     gym_branch_id = sys.argv[2]
 
-    kafka_broker = os.getenv("KAFKA_BROKER", "54.38.35.221:9094")
-
     bridge = ADMSBridge(
         tenant=tenant,
         gym_branch_id=gym_branch_id,
-        kafka_broker=kafka_broker,
     )
 
     def handle_sigterm(signum, frame):

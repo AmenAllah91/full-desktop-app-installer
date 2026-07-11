@@ -9,10 +9,10 @@ from os import getenv
 from typing import Optional
 
 from domain.DoorType import DoorType
-from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceContext
 from services.addAndAuthorizeUser import connect_to_device
 from services.websocket import send_pointage
+from services.http_client import send_pointage as send_pointage_http
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 if not PLCOMPRO_URL:
@@ -24,8 +24,6 @@ pl.Connect.restype = c_void_p
 pl.Disconnect.argtypes = [c_void_p]
 pl.GetRTLog.argtypes = [c_void_p, c_char_p, c_int]
 pl.GetRTLog.restype = c_int
-
-kafka = KafkaService(getenv("KAFKA_BROKER"), "rt_c3_group")
 
 ACCESS_GRANTED = {0}
 
@@ -188,11 +186,12 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                     porte_type=porte.value,
                 )
 
-                kafka.produce("rt_" + TENANT, payload)
+                payload_dict = json.loads(payload)
                 try:
-                    send_pointage(json.loads(payload), BRANCH_ID)
+                    send_pointage(payload_dict, BRANCH_ID)
+                    send_pointage_http(payload_dict, ctx.machine.id)
                 except Exception as ex:
-                    logging.error("[WebSocket] Erreur envoi WS: %s", ex)
+                    logging.error("[WebSocket] Erreur envoi WS/HTTP: %s", ex)
 
                 logging.info("📡 %s → %s", ip, payload)
 

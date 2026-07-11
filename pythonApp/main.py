@@ -19,13 +19,13 @@ from pathlib import Path
 import pythoncom
 
 from domain import Operation
-from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine, make_rt_json, kafka
+from services.MachineMonitor import monitor_machine, make_rt_json
+from services.http_client import send_pointage as send_pointage_http
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -43,11 +43,7 @@ class SPARequestHandler(SimpleHTTPRequestHandler):
         if self.path != "/" and not os.path.exists(self.translate_path(self.path)):
             self.path = "/index.html"
         return super().do_GET()
-# v2 imports
-from services.v2.startup import start_v2
-from services.v2.device_manager_v2 import DeviceManagerV2
 
-# Version globale — "v1" (legacy multi-protocole) ou "v2" (full PUSH/ADMS)
 app_version = "v1"
 
 def get_app_data_dir():
@@ -73,15 +69,16 @@ def initialize_env_file():
     """Initialize the .env file with default values if it doesn't exist."""
     if not os.path.exists(ENV_FILE_PATH):
         default_env_content = """# .env
-KAFKA_BROKER=54.38.35.221:9094
-KAFKA_GROUP_ID=group_c
-KAFKA_TOPIC=rt_
 GYM_BRANCH_ID=0
+TENANT=empire
 
 FLASK_HOST=0.0.0.0
 FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
+
+SPRING_BOOT_URL=http://localhost:8081
+DESKTOP_AGENT_URL=http://localhost:9998
 """
         with open(ENV_FILE_PATH, 'w') as f:
             f.write(default_env_content)
@@ -98,8 +95,6 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 load_dotenv(dotenv_path=ENV_FILE_PATH)
 initialize_env_file()
 
-KafkaBroker = os.getenv("KAFKA_BROKER")
-
 currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
 tenant =os.getenv("TENANT")
 
@@ -108,7 +103,7 @@ machineService = AccessMachineService()
 device_handle = None
 handle_lock = threading.RLock()
 stop_event_monitoring = threading.Event()
-stop_event_kafka = threading.Event()
+
 monitoring_success = threading.Event()
 device_queue = Queue()
 
@@ -121,9 +116,6 @@ MAX_LOCK_RETRIES = 3
 LOCK_TIMEOUT = 10
 QUEUE_TIMEOUT = 5
 MONITORING_INTERVAL = 0.1
-
-TOPIC_CONSUME_PUBLISH_PHOTO = "launch_publish_photo"
-TOPIC_PRODUCE_PUBLISH_PHOTO = "finish_publish_photo"
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:4200"}}, supports_credentials=True)
@@ -342,19 +334,11 @@ def delete_completedTasks():
 
 
 def get_device_context(machine_id):
-    """Retourne le DeviceContext pour une machine, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.get(machine_id)
-    else:
-        return DeviceManager.get(machine_id)
+    return DeviceManager.get(machine_id)
 
 
 def get_all_device_contexts():
-    """Retourne tous les DeviceContext, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.all()
-    else:
-        return list(DeviceManager._registry.values())
+    return list(DeviceManager._registry.values())
 
 
 def free_port(port, retries=3):
@@ -496,49 +480,6 @@ def process_device_queue() -> None:
         pythoncom.CoUninitialize()
 
 
-def process_message_pointage(message):
-    try:
-        json_message = json.loads(message)
-        print(f"Received message from new access request  topic from trenant {tenant}:", message)
-        required_keys = ["userPin", "operation", "cardNo", "startDate", "endDate", "machines"]
-        if all(key in json_message for key in required_keys) and str(json_message.get("gymBranchId")) == gym_branch_id:
-            for machine in json_message.get("machines", []):
-                if "addresseip" in machine and "port" in machine:
-                    add_task_to_queue({
-                        "machineId": machine["id"],
-                        "ip_address": machine["addresseip"],
-                        "port": str(machine["port"]),
-                        "user_pin": json_message["userPin"],
-                        "user_name": json_message["username"],
-                        "operation": json_message["operation"],
-                        "card_no": json_message["cardNo"],
-                        "start_date": json_message["startDate"],
-                        "end_date": json_message["endDate"]
-                    })
-                else:
-                    print("Error: Missing required fields in machine configuration.")
-    except Exception as e:
-        print(f"Error processing pointage_client json_message: {e}")
-
-
-def process_fingerprint_actions(message):
-    json_message = json.loads(message)
-    print(f"Received message from new access request  topic from trenant {tenant}:", message)
-    required_keys = ["pin", "operation", "fingerprint_template", "finger_id"]
-    machines = machineService.get_access_machines(gym_branch_id, tenant)
-    if all(key in json_message for key in required_keys):
-        for machine in machines:
-            add_task_to_queue({
-                "machineId": machine.id,
-                "ip_address": machine.addresseip,
-                "port": str(machine.port),
-                "user_pin": json_message["pin"],
-                "operation": json_message["operation"],
-                "finger_id": json_message["finger_id"],
-                "fingerprint_template": json_message["fingerprint_template"]
-            })
-
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -596,7 +537,7 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
                 "userPin": user_pin,
                 "photo": encoded
             }
-            logging.info(f"✅ Published photo for user {user_pin} to Kafka.")
+            logging.info(f"✅ Published photo for user {user_pin}.")
             return payload
         else:
             logging.error(f"❌ Failed to download photo for user {user_pin}.")
@@ -608,7 +549,6 @@ def cleanup_resources(driver=None):
     """Clean up application resources."""
     print("Initiating cleanup...")
     stop_event_monitoring.set()
-    stop_event_kafka.set()
     print("Application shutdown complete")
 
 
@@ -641,7 +581,7 @@ def upload_face_multipart():
     RETRY_DELAY = 1
 
     for ctx in get_all_device_contexts():
-        if str(ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId) != str(currentGymBranchId):
+        if str(ctx.gymBranchId) != str(currentGymBranchId):
             continue
 
         adapter = ctx.adapter
@@ -694,7 +634,7 @@ def upload_fingerprint():
 
         for ctx in get_all_device_contexts():
             machine_id = ctx.machine.id
-            branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+            branch_id = ctx.gymBranchId
             if str(branch_id) != str(currentGymBranchId):
                 continue
 
@@ -750,6 +690,30 @@ def upload_fingerprint():
     except Exception as e:
         logging.exception(f" Fatal error in fingerprint upload: {e}")
         return jsonify({"error": f"Exception during fingerprint upload: {str(e)}"}), 500
+
+
+@app.route('/fingerprint/actions', methods=['POST'])
+def fingerprint_actions():
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        abort(400, "Payload JSON invalide")
+
+    if not data or "pin" not in data or "operation" not in data:
+        abort(400, "pin et operation requis")
+
+    machines = machineService.get_access_machines(str(currentGymBranchId), tenant)
+    for machine in machines:
+        add_task_to_queue({
+            "machineId": machine.id,
+            "ip_address": machine.addresseip,
+            "port": str(machine.port),
+            "user_pin": str(data["pin"]),
+            "operation": data["operation"],
+            "finger_id": data.get("finger_id", 0),
+            "fingerprint_template": data.get("fingerprint_template", ""),
+        })
+    return jsonify({"status": "queued", "tasksQueued": len(machines)}), 201
 
 
 @app.route('/config/gymBranchId', methods=['GET'])
@@ -874,9 +838,7 @@ def test_open_door():
 
         adapter = ctx.adapter
 
-        if app_version == "v2":
-            ok = adapter.open_door(door_no=1, duration=duration)
-        elif hasattr(adapter, 'open_door'):
+        if hasattr(adapter, 'open_door'):
             ok = adapter.open_door(duration_seconds=duration) if hasattr(adapter, 'ACUnlock') else adapter.open_door(door_no=1, duration=duration)
         else:
             ok = False
@@ -939,14 +901,9 @@ def get_devices():
             "ip": ctx.machine.addresseip,
             "port": ctx.machine.port,
             "original_type": ctx.machine.type,
-            "mode": "PUSH/ADMS" if app_version == "v2" else ctx.machine.type,
+            "mode": ctx.machine.type,
         }
-        if app_version == "v2":
-            info["connected"] = adapter.is_connected()
-            info["sn"] = adapter.sn
-            info["last_seen"] = adapter.last_seen.isoformat() if adapter.last_seen else None
-        else:
-            info["connected"] = getattr(adapter, "connected", None)
+        info["connected"] = getattr(adapter, "connected", None)
         devices.append(info)
     return jsonify({"version": app_version, "devices": devices}), 200
 
@@ -1025,9 +982,7 @@ def open_door_api():
         adapter = ctx.adapter
 
         with ctx.lock:
-            if app_version == "v2":
-                ok = adapter.open_door(door_no=door_no, duration=duration)
-            elif isinstance(adapter, PlcommAdapter):
+            if isinstance(adapter, PlcommAdapter):
                 ok = adapter.open_door(door_no=door_no, duration=duration)
             elif isinstance(adapter, ZkemAdapter):
                 ok = adapter.open_door(duration_seconds=duration)
@@ -1062,8 +1017,8 @@ def open_door_api():
             )
 
             payload = json.loads(payload_json)
-            kafka.produce("rt_" + tenant, payload)
             send_pointage(payload, gym_branch_id)
+            send_pointage_http(payload, ctx.machine.id)
 
         except Exception as ex:
             logging.exception("Erreur lors de l'envoi du pointage manuel : %s", ex)
@@ -1091,10 +1046,7 @@ def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
                 ms = AccessMachineService()
                 machines = ms.get_access_machines(str(gym_branch_id), str(tenant))
                 for m in machines:
-                    if app_version == "v2":
-                        DeviceManagerV2.register(m, tenant, gym_branch_id)
-                    else:
-                        DeviceManager.register(m, tenant, gym_branch_id)
+                    DeviceManager.register(m, tenant, gym_branch_id)
                 ctx = get_device_context(machine_id)
             except Exception as e:
                 logging.error(f"❌ fallback register machines failed: {e}")
@@ -1144,10 +1096,7 @@ def soft_restart():
         stop_event_monitoring.clear()
 
         # 3 — Vider le DeviceManager
-        if app_version == "v2":
-            DeviceManagerV2.clear()
-        else:
-            DeviceManager._registry.clear()
+        DeviceManager._registry.clear()
 
         # 4 — Recharger les machines
         try:
@@ -1155,18 +1104,6 @@ def soft_restart():
             logging.info("🔌 Machines rechargées : %s", machines)
         except Exception as e:
             logging.error("❌ Erreur rechargement machines : %s", e)
-            return
-
-        if app_version == "v2":
-            # v2 restart : réenregistrer toutes les machines en PUSH
-            from services.v2.adms_server_v2 import ADMSServerV2
-            adms_srv = ADMSServerV2()
-            for m in machines:
-                ctx = DeviceManagerV2.register(m, tenant, gym_branch_id)
-                adms_srv.register_adapter(ctx.adapter)
-            from services.v2.monitor_v2 import setup_attendance_callback
-            setup_attendance_callback(adms_srv, tenant, gym_branch_id)
-            logging.info("✅ Soft restart v2 terminé")
             return
 
         for m in machines:
@@ -1233,13 +1170,13 @@ def wait_for_angular(host="127.0.0.1", port=4200, timeout=120):
                 return False
             time.sleep(1)
 if __name__ == '__main__':
-
-    spring_thread = threading.Thread(target=start_spring)
-    spring_thread.start()
-    angular_thread = threading.Thread(target=start_angular)
-    angular_thread.start()
+ # TODO: remove comments
+    # spring_thread = threading.Thread(target=start_spring)
+    # spring_thread.start()
+    # angular_thread = threading.Thread(target=start_angular)
+    # angular_thread.start()
     # angular_thread.join()
-    spring_thread.join()
+    # spring_thread.join()
     # threading.Thread(target=angular_watchdog).start()
 
     def handle_sigterm(signum, frame):
@@ -1256,25 +1193,16 @@ if __name__ == '__main__':
         tenant = sys.argv[1]
         gym_branch_id = sys.argv[2]
     else:
-        print("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]", file=sys.stderr)
-        sys.exit(1)
+        tenant = "empire"
+        gym_branch_id = "1"
+        print(f"Using defaults: tenant={tenant}, gym_branch_id={gym_branch_id}")
 
-    # Parse --version argument
     if "--version" in sys.argv:
         idx = sys.argv.index("--version")
-        if idx + 1 < len(sys.argv):
-            app_version = sys.argv[idx + 1].lower()
-        else:
-            print("--version requires a value (v1 or v2)", file=sys.stderr)
-            sys.exit(1)
-    else:
-        app_version = "v1"
+        if idx + 1 < len(sys.argv) and sys.argv[idx + 1].lower() == "v2":
+            print("v2 n'est plus supporté, utilisation de v1", file=sys.stderr)
 
-    if app_version not in ("v1", "v2"):
-        print(f"Version invalide: {app_version}. Attendu: v1 ou v2", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}    version : {app_version}")
+    print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}    version : v1")
     currentGymBranchId = gym_branch_id
 
     try:
@@ -1285,83 +1213,62 @@ if __name__ == '__main__':
         machines = machineService.get_access_machines(gym_branch_id, tenant)
         print("machines dispo   :", machines)
 
-        if app_version == "v2":
-            # ── v2 : Full PUSH/ADMS ──────────────────────────────────
-            start_v2(
-                machines=machines,
-                tenant=tenant,
-                gym_branch_id=gym_branch_id,
-                stop_event=stop_event_monitoring,
-                task_queue_functions={
-                    "initialize_db": initialize_task_queue_db,
-                    "add_task": add_task_to_queue,
-                    "get_next": get_next_task_from_queue,
-                    "mark_completed": mark_task_as_completed,
-                }
-            )
-        else:
-            # ── v1 : Legacy multi-protocole (C3 / STANDALONE / PUSH) ──
-            for m in machines:
-                DeviceManager.register(m, tenant, gym_branch_id)
+        initialize_task_queue_db()
+        threading.Thread(target=process_device_queue,
+                         daemon=True,
+                         name="DeviceQueueThread").start()
 
-            initialize_task_queue_db()
-            threading.Thread(target=process_device_queue,
-                             daemon=True,
-                             name="DeviceQueueThread").start()
+        global watchdog
+        watchdog = MachineWatchdog()
+        adms_server = None
+        has_push = any(m.type == "PUSH" for m in machines)
+        if has_push:
+            adms_server = ADMSServer(port=8088)
+            adms_server.start()
+            logging.info("🚀 Serveur ADMS démarré (port 8088)")
+        for m in machines:
+            ctx = DeviceManager.register(m, tenant, gym_branch_id)
 
-            global watchdog
-            watchdog = MachineWatchdog()
-            adms_server = None
-            has_push = any(m.type == "PUSH" for m in machines)
-            if has_push:
-                adms_server = ADMSServer(port=8088)
-                adms_server.start()
-                logging.info("🚀 Serveur ADMS démarré (port 8088)")
-            for m in machines:
-                ctx = DeviceManager.register(m, tenant, gym_branch_id)
+            if m.type == "C3":
+                def make_c3(ctx=ctx):
+                    return threading.Thread(
+                        target=monitor_machine,
+                        args=(ctx, stop_event_monitoring),
+                        daemon=True,
+                        name=f"RT-C3-{ctx.machine.addresseip}"
+                    )
 
-                if m.type == "C3":
-                    def make_c3(ctx=ctx):
-                        return threading.Thread(
-                            target=monitor_machine,
-                            args=(ctx, stop_event_monitoring),
-                            daemon=True,
-                            name=f"RT-C3-{ctx.machine.addresseip}"
-                        )
+                watchdog.register(m.id, make_c3)
 
-                    watchdog.register(m.id, make_c3)
+            elif m.type == "PUSH":
+                adapter = ctx.adapter
+                if adms_server:
+                    adms_server.register_adapter(adapter)
 
-                elif m.type == "PUSH":
-                    adapter = ctx.adapter
-                    if adms_server:
-                        adms_server.register_adapter(adapter)
+                def make_push(m=m, adapter=adapter):
+                    return threading.Thread(
+                        target=monitor_adms,
+                        args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
+                        daemon=True,
+                        name=f"RT-PUSH-{m.addresseip}"
+                    )
 
-                    def make_push(m=m, adapter=adapter):
-                        return threading.Thread(
-                            target=monitor_adms,
-                            args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
-                            daemon=True,
-                            name=f"RT-PUSH-{m.addresseip}"
-                        )
+                watchdog.register(m.id, make_push)
 
-                    watchdog.register(m.id, make_push)
+            else:  # STANDALONE_NEW_FIRMWARE
+                def make_zk(m=m):
+                    return threading.Thread(
+                        target=monitor_zkem,
+                        args=(m, m.addresseip, m.port, 1,
+                              stop_event_monitoring, tenant, gym_branch_id),
+                        daemon=True,
+                        name=f"RT-ZK-{m.addresseip}"
+                    )
 
-                else:  # STANDALONE_NEW_FIRMWARE
-                    def make_zk(m=m):
-                        return threading.Thread(
-                            target=monitor_zkem,
-                            args=(m, m.addresseip, m.port, 1,
-                                  stop_event_monitoring, tenant, gym_branch_id),
-                            daemon=True,
-                            name=f"RT-ZK-{m.addresseip}"
-                        )
+                watchdog.register(m.id, make_zk)
 
-                    watchdog.register(m.id, make_zk)
-
-            watchdog.start()
+        watchdog.start()
         # ───────────────────────────────────────────────────────────────
-
-        start_kafka_consumers()
 
         free_port(FLASK_PORT)
         threading.Thread(target=lambda: app.run(

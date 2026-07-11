@@ -5,7 +5,6 @@ from typing import Union
 import pywintypes
 
 from domain import AccessMachine
-from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
 from services.websocket import send_pointage
 

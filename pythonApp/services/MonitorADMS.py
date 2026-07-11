@@ -5,7 +5,7 @@ Module de monitoring pour les appareils PUSH/ADMS.
 
 Contrairement aux monitors C3 (polling GetRTLog) et ZKEM (événements COM),
 les machines PUSH envoient les pointages directement au serveur ADMS.
-Ce module configure le callback et gère la publication Kafka + WebSocket.
+Ce module configure le callback et gère la publication HTTP + WebSocket.
 """
 
 import json
@@ -16,9 +16,9 @@ from os import getenv
 from typing import Optional
 
 from domain.AccessMachine import AccessMachine
-from kafka_service.kafkaservice import KafkaService
 from services.MachineMonitor import make_rt_json
 from services.websocket import send_pointage
+from services.http_client import send_pointage as send_pointage_http
 
 
 def monitor_adms(machine: AccessMachine, adapter, stop_evt,
@@ -31,10 +31,8 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
     Ce thread:
     1. Configure le callback de pointage sur le serveur ADMS
     2. Vérifie périodiquement la connexion de l'appareil
-    3. Publie les pointages sur Kafka + WebSocket
+    3. Publie les pointages sur HTTP (Spring Boot) + WebSocket
     """
-    kafka = KafkaService(getenv("KAFKA_BROKER"), f"group_rt_push_{tenant}")
-
     # Configurer le callback de pointage
     from services.adms_server import ADMSServer
     adms_server = ADMSServer()
@@ -60,12 +58,12 @@ def monitor_adms(machine: AccessMachine, adapter, stop_evt,
                 porte_type=machine.porte_type or "ENTREE",
             )
 
-            kafka.produce(f"rt_{tenant}", payload)
-
             try:
-                send_pointage(json.loads(payload), gym_branch_id)
+                payload_dict = json.loads(payload)
+                send_pointage(payload_dict, gym_branch_id)
+                send_pointage_http(payload_dict, machine.id)
             except Exception as ex:
-                logging.error("[WebSocket] Erreur envoi WS: %s", ex)
+                logging.error("[WebSocket/HTTP] Erreur envoi: %s", ex)
 
             logging.info("📡 PUSH %s → %s", machine.addresseip, payload)
 
