@@ -64,7 +64,7 @@ def initialize_env_file():
     """Initialize the .env file with default values if it doesn't exist."""
     if not os.path.exists(ENV_FILE_PATH):
         default_env_content = """# .env
-KAFKA_BROKER=54.38.35.221:9094
+KAFKA_BROKER=51.178.55.238:9094
 KAFKA_GROUP_ID=group_c
 KAFKA_TOPIC=rt_pointage
 GYM_BRANCH_ID=0
