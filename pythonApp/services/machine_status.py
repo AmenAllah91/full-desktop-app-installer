@@ -1,106 +1,44 @@
+# services/machine_status.py
+#
+# Suivi de l'état de connectivité des machines d'accès + diffusion websocket.
+# Le front (pointage-sidebar) attend des messages de la forme :
+#   {"type": "machine_status_changed", "data": {<MachineStatusEvent>}}
+# où <MachineStatusEvent> = machineId, alias, ip, port, machineType, connected,
+# lastError, lastSeen, onlineSince, offlineSince, reconnectCount, eventCount,
+# reason, timestamp.
 import logging
-import time
 import threading
-from typing import List, Dict, Any
+import time
 
-from domain.AccessMachine import AccessMachine
+from services.websocket import broadcast_ws
 
 logger = logging.getLogger(__name__)
 
+_states: dict = {}   # machine_id -> état courant (dict au format MachineStatusEvent)
 _lock = threading.Lock()
-_machines: Dict[int, Dict[str, Any]] = {}
 
 
-def register_machine(machine: AccessMachine):
-    with _lock:
-        _machines[machine.id] = {
-            "alias": machine.alias,
-            "ip": machine.addresseip,
-            "port": machine.port,
-            "type": machine.type,
-            "status": "disconnected",
-            "message": "En attente de connexion",
-            "level": "disconnected",
-            "lastEvent": None,
-            "lastSeen": None,
-        }
-    logger.info("[machine_status] Machine %s (%s) enregistrée", machine.alias, machine.addresseip)
-
-
-def mark_connected(machine: AccessMachine, message: str = "connected"):
-    now = time.time()
-    with _lock:
-        entry = _machines.get(machine.id)
-        if entry:
-            entry["status"] = "connected"
-            entry["message"] = message
-            entry["level"] = "info"
-            entry["lastSeen"] = now
-            state = _make_state(machine.id, entry)
-        else:
-            _machines[machine.id] = {
-                "alias": machine.alias, "ip": machine.addresseip,
-                "port": machine.port, "type": machine.type,
-                "status": "connected", "message": message, "level": "info",
-                "lastEvent": None, "lastSeen": now,
-            }
-            state = _make_state(machine.id, _machines[machine.id])
-    _broadcast(state)
-    logger.info("[machine_status] %s → connected (%s)", machine.alias, message)
-
-
-def mark_disconnected(machine: AccessMachine, message: str = "", level: str = "disconnected"):
-    with _lock:
-        entry = _machines.get(machine.id)
-        if entry:
-            entry["status"] = "disconnected"
-            entry["message"] = message
-            entry["level"] = level
-            state = _make_state(machine.id, entry)
-        else:
-            _machines[machine.id] = {
-                "alias": machine.alias, "ip": machine.addresseip,
-                "port": machine.port, "type": machine.type,
-                "status": "disconnected", "message": message, "level": level,
-                "lastEvent": None, "lastSeen": None,
-            }
-            state = _make_state(machine.id, _machines[machine.id])
-    _broadcast(state)
-    logger.info("[machine_status] %s → disconnected (%s)", machine.alias, message)
-
-
-def mark_event(machine: AccessMachine):
-    now = time.time()
-    with _lock:
-        entry = _machines.get(machine.id)
-        if entry:
-            entry["lastEvent"] = now
-            entry["lastSeen"] = now
-
-
-def snapshot() -> List[Dict[str, Any]]:
-    with _lock:
-        return [_make_state(mid, info) for mid, info in _machines.items()]
-
-
-def _make_state(mid: int, info: Dict[str, Any]) -> Dict[str, Any]:
+def _new_state(machine) -> dict:
     return {
-        "machineId": mid,
-        "alias": info.get("alias", ""),
-        "ip": info.get("ip", ""),
-        "port": info.get("port"),
-        "type": info.get("type", ""),
-        "status": info["status"],
-        "level": info["level"],
-        "message": info["message"],
-        "lastEvent": info.get("lastEvent"),
-        "lastSeen": info.get("lastSeen"),
+        "machineId": machine.id,
+        "alias": getattr(machine, "alias", "") or "",
+        "ip": getattr(machine, "addresseip", "") or "",
+        "port": getattr(machine, "port", 0) or 0,
+        "machineType": getattr(machine, "type", "") or "",
+        "connected": False,
+        "lastError": "",
+        "lastSeen": 0,
+        "onlineSince": 0,
+        "offlineSince": 0,
+        "reconnectCount": 0,
+        "eventCount": 0,
+        "reason": "disconnected",
+        "timestamp": time.time(),
     }
 
 
-def _broadcast(state: Dict[str, Any]):
+def _broadcast(state: dict):
     try:
-        from services.websocket import broadcast_ws
         broadcast_ws({
             "type": "machine_status_changed",
             "channel": "machinestatus",
@@ -108,4 +46,82 @@ def _broadcast(state: Dict[str, Any]):
             "timestamp": time.time(),
         })
     except Exception as ex:
-        logger.debug("[machine_status] broadcast failed: %s", ex)
+        logger.error("[MachineStatus] Erreur broadcast: %s", ex)
+
+
+def register_machine(machine):
+    """Crée l'entrée (état 'déconnecté') sans diffuser — appelé au démarrage."""
+    with _lock:
+        if machine.id not in _states:
+            _states[machine.id] = _new_state(machine)
+
+
+def mark_connected(machine, reason: str = "connected"):
+    """À appeler quand une machine (re)devient joignable. Ne diffuse que si l'état change."""
+    now = time.time()
+    with _lock:
+        state = _states.setdefault(machine.id, _new_state(machine))
+        was_connected = state["connected"]
+        state["connected"] = True
+        state["lastSeen"] = now
+        state["lastError"] = ""
+        state["reason"] = reason if not was_connected else state["reason"]
+        state["timestamp"] = now
+        if not was_connected:
+            state["onlineSince"] = now
+            if reason == "reconnected":
+                state["reconnectCount"] += 1
+        changed = not was_connected
+        snapshot = dict(state)
+    if changed:
+        logger.info("[MachineStatus] 🟢 Machine %s (%s) connectée (%s)",
+                    machine.id, snapshot["ip"], reason)
+        _broadcast(snapshot)
+
+
+def mark_disconnected(machine, error: str = "", reason: str = "disconnected"):
+    """À appeler quand une machine devient injoignable. Ne diffuse que si l'état change."""
+    now = time.time()
+    with _lock:
+        state = _states.setdefault(machine.id, _new_state(machine))
+        was_connected = state["connected"]
+        state["connected"] = False
+        state["lastError"] = error or state["lastError"]
+        state["reason"] = reason
+        state["timestamp"] = now
+        if was_connected:
+            state["offlineSince"] = now
+        changed = was_connected
+        snapshot = dict(state)
+    if changed:
+        logger.warning("[MachineStatus] 🔴 Machine %s (%s) déconnectée (%s) : %s",
+                       machine.id, snapshot["ip"], reason, error)
+        _broadcast(snapshot)
+
+
+def mark_event(machine):
+    """À appeler à chaque événement temps réel reçu — rafraîchit lastSeen sans diffuser."""
+    now = time.time()
+    with _lock:
+        state = _states.get(machine.id)
+        if state is None:
+            state = _states.setdefault(machine.id, _new_state(machine))
+        state["eventCount"] += 1
+        state["lastSeen"] = now
+        # Recevoir un événement prouve que la machine est en ligne.
+        if not state["connected"]:
+            state["connected"] = True
+            state["onlineSince"] = now
+            state["reason"] = "connected"
+            state["timestamp"] = now
+            snapshot = dict(state)
+        else:
+            snapshot = None
+    if snapshot:
+        _broadcast(snapshot)
+
+
+def snapshot() -> list:
+    """État courant de toutes les machines (pour l'envoi initial aux clients ws)."""
+    with _lock:
+        return [dict(s) for s in _states.values()]
