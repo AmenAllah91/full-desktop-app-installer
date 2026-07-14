@@ -97,7 +97,7 @@ KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "rt_pointage")
 
 # Flask application initialization
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": lambda o, r: True}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], supports_credentials=True)
 
 
 @app.after_request
