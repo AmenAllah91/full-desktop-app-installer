@@ -18,3 +18,5 @@ Thumbs.db
 # Fichiers temporaires
 *.pyc
 __pycache__/
+/resources/SDK/SDK/x64/commpro.dll
+/.idea/

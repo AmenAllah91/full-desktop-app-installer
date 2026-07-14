@@ -43,6 +43,23 @@ async def _ws_handler(ws: WebSocketServerProtocol):
                 if gb:
                     gym_branch_id = gb
 
+                # Abonnement au statut machines : on pousse immédiatement l'état
+                # courant de toutes les machines, sinon le client ne voit rien
+                # tant qu'aucune machine ne change d'état.
+                # ('mahcinestatus' = typo historique du front, conservée par compat)
+                if ch in ("machinestatus", "mahcinestatus", "machine_status"):
+                    try:
+                        from services.machine_status import snapshot
+                        for state in snapshot():
+                            await ws.send(json.dumps({
+                                "type": "machine_status_changed",
+                                "channel": "machinestatus",
+                                "data": state,
+                                "timestamp": time.time(),
+                            }, ensure_ascii=False))
+                    except Exception as ex:
+                        logger.error("[WebSocket] Erreur envoi snapshot statut machines: %s", ex)
+
             else:
                 logger.info("[WebSocket] Message non géré: %s", data)
 

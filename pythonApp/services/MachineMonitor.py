@@ -13,6 +13,7 @@ from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceContext
 from services.addAndAuthorizeUser import connect_to_device
 from services.websocket import send_pointage
+from services.machine_status import mark_connected, mark_disconnected, mark_event
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 if not PLCOMPRO_URL:
@@ -26,6 +27,11 @@ pl.GetRTLog.argtypes = [c_void_p, c_char_p, c_int]
 pl.GetRTLog.restype = c_int
 
 kafka = KafkaService(getenv("KAFKA_BROKER"), "rt_c3_group")
+
+# Topic UNIQUE pour les pointages de tous les tenants : gym-management écoute
+# ce seul topic (le tenant est porté par le champ "tenant" du payload).
+# Doit correspondre à app.kafka.pointage-topic côté gym-management.
+POINTAGE_TOPIC = getenv("POINTAGE_TOPIC", "rt_pointage")
 
 ACCESS_GRANTED = {0}
 
@@ -45,6 +51,8 @@ def is_c3_handle_connected(handle: Optional[c_void_p]) -> bool:
 def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
     ip, port = ctx.machine.addresseip, str(ctx.machine.port)
 
+    mark_disconnected(ctx.machine, "Connexion perdue, reconnexion en cours", "disconnected")
+
     for attempt in range(max_retries):
         try:
             logging.info(f"🔄 Reconnexion C3 {attempt + 1}/{max_retries} pour {ip}")
@@ -62,6 +70,7 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
                 with ctx.lock:
                     ctx.set_handle(new_handle)
                 logging.info(f"✅ C3 {ip} reconnecté avec succès")
+                mark_connected(ctx.machine, "reconnected")
                 return True
             if new_handle:
                 try:
@@ -75,6 +84,7 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
             time.sleep(5)
 
     logging.error(f"❌ Impossible de reconnecter C3 {ip} après {max_retries} tentatives")
+    mark_disconnected(ctx.machine, f"Reconnexion impossible après {max_retries} tentatives", "timeout")
     return False
 
 
@@ -149,7 +159,9 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
                 logging.info(f"🔌 C3 {ip} connecté")
+                mark_connected(ctx.machine, "connected")
             else:
+                mark_disconnected(ctx.machine, "Connexion initiale impossible", "error")
                 time.sleep(1)
                 continue
 
@@ -158,6 +170,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
             if ret > 0:
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
+                mark_event(ctx.machine)
                 raw = buf.value.decode(errors="ignore")
                 if not is_event(raw):
                     continue
@@ -186,9 +199,10 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                     card_no=card_no,
                     gym_branch_id=BRANCH_ID,
                     porte_type=porte.value,
+                    tenant=TENANT,
                 )
 
-                kafka.produce("rt_" + TENANT, payload)
+                kafka.produce(POINTAGE_TOPIC, payload)
                 try:
                     send_pointage(json.loads(payload), BRANCH_ID)
                 except Exception as ex:
@@ -223,6 +237,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
         if ctx.handle:
             pl.Disconnect(ctx.handle)
         ctx.set_handle(None)
+    mark_disconnected(ctx.machine, "Monitoring arrêté", "disconnected")
     logging.warning("🔌 RT C3 arrêté %s", ip)
 
 
@@ -238,6 +253,7 @@ def make_rt_json(
     card_no: Optional[str],
     gym_branch_id: str,
     porte_type: str,
+    tenant: str = "",
 ) -> str:
     payload = {
         "id_machine": machine_id,
@@ -250,6 +266,9 @@ def make_rt_json(
         "gym_branch_id": gym_branch_id,
         "cardNo": card_no or "",
         "porte_type": porte_type,
+        # Requis par gym-management : topic unique pour tous les tenants,
+        # le tenant est résolu à partir du payload (message ignoré s'il manque).
+        "tenant": tenant,
     }
     return json.dumps(payload, ensure_ascii=False)
 

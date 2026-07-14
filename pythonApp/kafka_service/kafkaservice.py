@@ -6,7 +6,7 @@ import time
 
 
 class KafkaService:
-    def __init__(self, kafka_broker: str, group_id: str):
+    def __init__(self, kafka_broker: str, group_id: str, auto_offset_reset: str = 'earliest'):
         """Initialize Kafka producer and consumer with the provided configurations."""
         # Initialize Kafka Producer
         self.producer = Producer({'bootstrap.servers': kafka_broker})
@@ -15,7 +15,7 @@ class KafkaService:
         self.consumer = Consumer({
             'bootstrap.servers': kafka_broker,
             'group.id': group_id,
-            'auto.offset.reset': 'earliest',
+            'auto.offset.reset': auto_offset_reset,
             'metadata.max.age.ms': '10000',
             'session.timeout.ms': 60000,  # Increase session timeout
             'max.poll.interval.ms': 300000

@@ -1,6 +1,7 @@
 import base64
 import os
 import signal
+import socket
 import sys
 import threading
 from datetime import datetime
@@ -18,7 +19,7 @@ from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter
 from services.captureFingerPrint import FingerprintCapture
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine, make_rt_json, kafka
+from services.MachineMonitor import monitor_machine, make_rt_json, kafka, POINTAGE_TOPIC
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -27,6 +28,7 @@ from dotenv import load_dotenv, set_key
 
 from services.websocket import start_ws_server, send_pointage
 from services.zkem_adapter import ZkemAdapter
+from services import machine_status
 
 
 def get_app_data_dir():
@@ -76,19 +78,24 @@ TEMP_DIR = os.path.join(APP_DATA_DIR, 'temp')
 # Create temp directory for photos
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Load environment variables from AppData
-load_dotenv(dotenv_path=ENV_FILE_PATH)
+# Create the .env with defaults BEFORE loading it, otherwise the first run
+# starts with no variables at all (GYM_BRANCH_ID=None -> crash).
 initialize_env_file()
+load_dotenv(dotenv_path=ENV_FILE_PATH)
 
 KafkaBroker = os.getenv("KAFKA_BROKER")
 
 # Flask application initialization
 app = Flask(__name__)
 CORS(app)
-currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
+currentGymBranchId = int(os.getenv("GYM_BRANCH_ID", "0") or 0)
 tenant =os.getenv("TENANT")
 # Kafka service configuration
 # el kafka service service bech nal9aw fiha el connection m3a el server eli fyha kafka "broker" w nal9aw methods kima el produce w el consume
+# NOTE: ces instances sont recréées dans __main__ une fois le vrai gym_branch_id
+# connu (argv). Le group id doit être unique par branche ET par poste, sinon les
+# PC de branches différentes se partagent les messages d'un même groupe Kafka et
+# des demandes d'accès sont consommées puis jetées par la mauvaise branche.
 pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
 publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
 fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
@@ -328,7 +335,7 @@ def process_message_pointage(message):
                         "ip_address": machine["addresseip"],
                         "port": str(machine["port"]),
                         "user_pin": json_message["userPin"],
-                        "user_name": json_message["username"],
+                        "user_name": json_message.get("username") or "",
                         "operation": json_message["operation"],
                         "card_no": json_message["cardNo"],
                         "start_date": json_message["startDate"],
@@ -398,7 +405,7 @@ def capture_fingerprint_api(user_pin, gym_branch_id, machine_id):
 def curentconf():
     try:
         payload = payload = {
-            "gymbranchId": currentGymBranchId,
+            "gymbranchId": int(currentGymBranchId),
             "tenant": tenant
         }
         if payload:
@@ -434,7 +441,9 @@ def consume_publish_photo():
 
 
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
-    if gym_branch_id != currentGymBranchId:
+    # Comparaison en str : gym_branch_id arrive tantôt en int (JSON), tantôt en
+    # str, et currentGymBranchId est une str (argv) au runtime.
+    if str(gym_branch_id) != str(currentGymBranchId):
         return None
 
     ctx = DeviceManager._registry.get(machine_id)
@@ -470,7 +479,7 @@ def ensure_all_kafka_topics():
         TOPIC_CONSUME_PUBLISH_PHOTO,
         TOPIC_PRODUCE_PUBLISH_PHOTO,
         'fingerprint_actions_' + tenant,
-        'rt_' + tenant,
+        POINTAGE_TOPIC,
     ]
     for topic in topics:
         pointage_kafka.ensure_topic(topic)
@@ -650,7 +659,7 @@ def upload_fingerprint():
 
 @app.route('/config/gymBranchId', methods=['GET'])
 def get_gym_branch_id():
-    return {"gymBranchId": currentGymBranchId}
+    return {"gymBranchId": int(currentGymBranchId)}
 
 
 # -------------------------------------------------------------
@@ -667,6 +676,15 @@ REQUIRED_TOP = {
 REQUIRED_MACHINE = {"id", "addresseip", "port", "type"}
 
 
+@app.after_request
+def allow_private_network(response):
+    # Chrome "Private Network Access" : un front servi en HTTPS public doit
+    # recevoir ce header sur le preflight pour pouvoir appeler ce service local.
+    if request.method == 'OPTIONS':
+        response.headers['Access-Control-Allow-Private-Network'] = 'true'
+    return response
+
+
 @app.route('/tasks/access', methods=['POST'])
 def enqueue_access_tasks():
     try:
@@ -679,7 +697,7 @@ def enqueue_access_tasks():
         missing = REQUIRED_TOP - data.keys()
         abort(400, f"Champs manquants : {', '.join(missing)}")
 
-    if str(data["gymBranchId"]) != currentGymBranchId:
+    if str(data["gymBranchId"]) != str(currentGymBranchId):
         abort(400, "gymBranchId ne correspond pas à la configuration locale")
 
     if not isinstance(data["machines"], list) or not data["machines"]:
@@ -696,7 +714,7 @@ def enqueue_access_tasks():
             "ip_address": m["addresseip"],
             "port": str(m["port"]),
             "user_pin": data["userPin"],
-            "user_name": data["username"],
+            "user_name": data.get("username") or "",
             "operation": data["operation"],
             "card_no": data["cardNo"],
             "start_date": data["startDate"],
@@ -726,6 +744,43 @@ def api_machines_status():
             "connected": connected,
         })
     return jsonify(statuses), 200
+
+
+@app.route('/api/machines/<int:machine_id>/reconnect', methods=['POST'])
+def api_machine_reconnect(machine_id):
+    """Reconnexion manuelle demandée depuis le front (bouton de la sidebar)."""
+    ctx = DeviceManager.get(machine_id)
+    if not ctx:
+        abort(404, f"Machine {machine_id} inconnue sur cette instance")
+
+    def _do_reconnect():
+        try:
+            if isinstance(ctx.adapter, PlcommAdapter):
+                from services.MachineMonitor import attempt_c3_reconnection
+                attempt_c3_reconnection(ctx)
+            else:
+                import pythoncom
+                pythoncom.CoInitialize()
+                try:
+                    with ctx.lock:
+                        try:
+                            ctx.adapter.disconnect()
+                        except Exception:
+                            pass
+                        ok = ctx.adapter.connect()
+                    if ok:
+                        machine_status.mark_connected(ctx.machine, "reconnected")
+                    else:
+                        machine_status.mark_disconnected(ctx.machine, "Reconnexion manuelle échouée", "error")
+                finally:
+                    pythoncom.CoUninitialize()
+        except Exception as ex:
+            logging.exception("Erreur reconnexion manuelle machine %s : %s", machine_id, ex)
+            machine_status.mark_disconnected(ctx.machine, str(ex), "error")
+
+    threading.Thread(target=_do_reconnect, daemon=True,
+                     name=f"Reconnect-{machine_id}").start()
+    return jsonify({"status": "requested", "machineId": machine_id}), 202
 
 
 REQUIRED_OPEN = {"gymBranchId", "machineId"}
@@ -792,10 +847,11 @@ def open_door_api():
                 card_no=None,
                 gym_branch_id=gym_branch_id,
                 porte_type=porte_type,
+                tenant=tenant,
             )
 
             payload = json.loads(payload_json)
-            kafka.produce("rt_" + tenant, payload)
+            kafka.produce(POINTAGE_TOPIC, payload)
 
             send_pointage(payload, gym_branch_id)
 
@@ -836,6 +892,26 @@ if __name__ == '__main__':
 
     print(f"current tenant  : {tenant}    gymbranchid : {gym_branch_id}")
     currentGymBranchId = gym_branch_id
+
+    # Recréation des services Kafka avec le VRAI gym_branch_id (argv) et un
+    # group id unique par poste : sémantique broadcast — chaque PC de la branche
+    # reçoit tous les messages et ne traite que ses propres machines.
+    # auto_offset_reset='latest' évite de rejouer tout l'historique du topic
+    # lors du premier démarrage avec un nouveau group id.
+    _hostname = socket.gethostname()
+    pointage_kafka = KafkaService(
+        kafka_broker=KafkaBroker,
+        group_id=f"pointage_group_{gym_branch_id}_{_hostname}",
+        auto_offset_reset='latest')
+    publish_photo_kafka = KafkaService(
+        kafka_broker=KafkaBroker,
+        group_id=f"photo_publish_group_{gym_branch_id}_{_hostname}",
+        auto_offset_reset='latest')
+    fingerprint_kafka = KafkaService(
+        kafka_broker=KafkaBroker,
+        group_id=f"fingerprint_group_{gym_branch_id}_{_hostname}",
+        auto_offset_reset='latest')
+
     try:
         logging.basicConfig(
             level=logging.INFO,
@@ -845,6 +921,9 @@ if __name__ == '__main__':
         print("machines dispo   :", machines)
         for m in machines:
             DeviceManager.register(m, tenant, gym_branch_id)
+            # État initial "déconnecté" : la sidebar du front reçoit le snapshot
+            # dès sa connexion websocket, avant même le premier événement.
+            machine_status.register_machine(m)
 
         # SQLite et thread DeviceQueue (pas changé)
         initialize_task_queue_db()
