@@ -80,16 +80,15 @@ if not exist ".env" (
 
 
 
-python -m PyInstaller --onefile --name=pythonApp main.py --hidden-import=Crypto --hidden-import=Crypto.Cipher --hidden-import=Crypto.Hash --hidden-import=Crypto.Random --hidden-import=Crypto.Util
+python -m PyInstaller --onedir --noupx --name=pythonApp main.py --hidden-import=Crypto --hidden-import=Crypto.Cipher --hidden-import=Crypto.Hash --hidden-import=Crypto.Random --hidden-import=Crypto.Util --collect-all certifi
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
     exit /b 1
 )
-copy /y "dist\pythonApp.exe" "..\%OUTPUT_DIR%\python\"
+xcopy /e /i /y "dist\pythonApp" "..\%OUTPUT_DIR%\python\"
 copy /y ".env" "..\%OUTPUT_DIR%\python\"
 copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
-del "pythonApp.spec"
 cd ..
 echo.
 
@@ -296,9 +295,7 @@ if exist "electron" (
 
 if exist "python\pythonApp.exe" (
     echo Copying Python app...
-    copy /y "python\pythonApp.exe" "installer\"
-    copy /y "python\.env" "installer\"
-    copy /y "python\libzkfpcsharp.dll" "installer\"
+    xcopy /e /i /y "python\*" "installer\"
     echo. > installer\task_queue.db
 ) else (
     echo ⚠️ Warning: pythonApp.exe not found!

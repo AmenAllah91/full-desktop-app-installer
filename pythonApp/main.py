@@ -147,7 +147,7 @@ class MachineWatchdog:
     """
 
     BASE_DELAY = 5
-    MAX_DELAY  = 120
+    MAX_DELAY  = 300
     CHECK_INTERVAL = 10
     ZOMBIE_TIMEOUT = 300
 
