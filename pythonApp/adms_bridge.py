@@ -1063,7 +1063,7 @@ if __name__ == "__main__":
     tenant = sys.argv[1]
     gym_branch_id = sys.argv[2]
 
-    kafka_broker = os.getenv("KAFKA_BROKER", "54.38.35.221:9094")
+    kafka_broker = os.getenv("KAFKA_BROKER", "51.178.55.238:9094")
 
     bridge = ADMSBridge(
         tenant=tenant,
