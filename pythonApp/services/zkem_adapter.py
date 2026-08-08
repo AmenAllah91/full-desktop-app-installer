@@ -97,7 +97,7 @@ class ZkemAdapter(DeviceAdapter):
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
             # user privileges 0 : user normal , 1 : enroller , 2 : admin , 3 : superadmin
-        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 0, True)
+        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 3, True)
         if not ok:
             logging.error("SSR_SetUserInfo KO (pin=%s) err=%s",
                           pin, zkem_last_error(self.zk))

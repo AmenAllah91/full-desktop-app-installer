@@ -19,6 +19,7 @@ from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter, MachineType
 from services.captureFingerPrint import FingerprintCapture
+from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
 from services.MachineMonitor import monitor_machine, make_rt_json, kafka, attempt_c3_reconnection
 
@@ -73,6 +74,7 @@ FLASK_HOST=0.0.0.0
 FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
+DOCUMENT_MANAGER_URL=https://integration.yogym.co/document-management
 """
         with open(ENV_FILE_PATH, 'w') as f:
             f.write(default_env_content)
@@ -661,6 +663,8 @@ from pathlib import Path
 UPLOAD_DIR = Path(TEMP_DIR) / "faces"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+document_manager_service = DocumentManagerService()
+
 
 @app.route('/face/upload', methods=['POST'])
 def upload_face_multipart():
@@ -668,16 +672,33 @@ def upload_face_multipart():
     gym_branchId = request.form.get('gymBranchId')
     file = request.files.get('photo')
 
-    if not all([pin, gym_branchId, file]):
-        abort(400, "pin, gymBranchId et fichier photo sont requis")
+    if not all([pin, gym_branchId]):
+        abort(400, "pin et gymBranchId sont requis")
 
     if str(gym_branchId) != str(currentGymBranchId):
         abort(400, "gymBranchId ne correspond pas à cette instance")
 
     dst_name = f"verify_biophoto_9_{pin}.jpg"
     dst_path = UPLOAD_DIR / secure_filename(dst_name)
-    file.save(dst_path)
-    logging.info("📥 Photo enregistrée : %s", dst_path)
+
+    # Résolution de la photo : celle envoyée dans la requête, sinon celle déjà
+    # sur ce PC, sinon MinIO. Un poste fraîchement installé n'a aucune photo en
+    # local : on va alors la chercher via document-manager et on la garde sur
+    # disque pour les envois suivants.
+    if file and file.filename:
+        file.save(dst_path)
+        logging.info("📥 Photo enregistrée : %s", dst_path)
+    elif dst_path.exists():
+        logging.info("📂 Photo déjà présente sur ce PC : %s", dst_path)
+    elif document_manager_service.download_faceid_photo(pin, tenant, dst_path):
+        logging.info("📥 Photo enregistrée : %s", dst_path)
+    else:
+        logging.error("❌ Aucune biophoto disponible pour le PIN %s", pin)
+        return jsonify({
+            "pin": pin,
+            "error": "Aucune biophoto pour ce PIN, ni sur ce PC ni dans MinIO : "
+                     "une nouvelle saisie est nécessaire"
+        }), 404
 
     report = {}
     MAX_UPLOAD_RETRIES = 3
