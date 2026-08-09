@@ -25,11 +25,11 @@ def has_comkey(value):
 
 
 def main():
-    IP = "192.168.2.12"
+    IP = "192.168.1.201"
     PORT = 4370              # port par défaut pour ZKTeco TCP/IP
-    COM_KEY = 0         # comKey de la machine (None/0/"" si elle n'en a pas)
+    COM_KEY = 123456         # comKey de la machine (None/0/"" si elle n'en a pas)
     MACHINE_NUMBER = 1        # numéro machine souvent = 1 pour standalone
-    PIN = "5"                 # PIN de l'utilisateur à créer / mettre à jour
+    PIN = "10"                 # PIN de l'utilisateur à créer / mettre à jour
     NAME = "Aymen Chaabani" # Nom affiché
     PASSWORD = 0              # mot de passe (vide si non nécessaire)
     PRIVILEGE = 3             # 2 = SuperAdmin (selon devices / firmware)

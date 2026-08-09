@@ -74,7 +74,7 @@ FLASK_HOST=0.0.0.0
 FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
-DOCUMENT_MANAGER_URL=https://integration.yogym.co/document-management
+DOCUMENT_MANAGER_URL=https://app.yogym.co/document-management
 """
         with open(ENV_FILE_PATH, 'w') as f:
             f.write(default_env_content)

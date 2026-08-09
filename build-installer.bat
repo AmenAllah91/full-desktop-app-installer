@@ -61,8 +61,8 @@ if not exist ".env" (
     echo KAFKA_BROKER=51.178.55.238:9094
     echo KAFKA_GROUP_ID=group_c
     echo KAFKA_TOPIC=rt_
-    echo GYM_BRANCH_ID=1004
-    echo TENANT=empire
+    echo GYM_BRANCH_ID=2
+    echo TENANT=empiregym
     echo.
     echo FLASK_HOST=0.0.0.0
     echo FLASK_PORT=9998

@@ -18,7 +18,7 @@ class DocumentManagerService:
     def __init__(self, base_url=None, timeout=15):
         self.base_url = (base_url or os.getenv(
             "DOCUMENT_MANAGER_URL",
-            "https://integration.yogym.co/document-management"
+            "https://app.yogym.co/document-management"
         )).rstrip("/")
         self.session = requests.Session()
         self.timeout = timeout
