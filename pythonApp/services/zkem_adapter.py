@@ -174,7 +174,9 @@ class ZkemAdapter(DeviceAdapter):
 
     def resource_path(self,relative_path: str, subfolder: str = None) -> str:
         if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
+            # PyInstaller onefile : les datas sont extraites dans _MEIPASS,
+            # pas à côté de l'exe. onedir : _MEIPASS == dossier de l'exe.
+            base_dir = getattr(sys, '_MEIPASS', None) or os.path.dirname(sys.executable)
         else:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             base_dir = os.path.dirname(base_dir)
@@ -204,20 +206,31 @@ class ZkemAdapter(DeviceAdapter):
         temp_dir = Path(path).parent
         temp_dir.mkdir(parents=True, exist_ok=True)
 
+        # 5e argument attendu par l'exe : le comKey.
+        # "0" = aucun mot de passe de communication (sinon l'exe retombe
+        # sur sa valeur par défaut codée en dur, 654321).
+        try:
+            com_key_arg = str(int(self.com_key or 0))
+        except (TypeError, ValueError):
+            com_key_arg = "0"
+
         cmd = [
             str(exe_path),
-            self.machine.addresseip,          # IP
-            str(self.machine.port),           # port
+            str(self.ip),                     # IP
+            str(self.port),                   # port
             str(pin),                         # user PIN
-            str(temp_dir)                     # dossier destination
+            # normpath : retire le "\" final que list2cmdline échapperait
+            os.path.normpath(str(temp_dir)),
+            com_key_arg                       # comKey
         ]
 
-        logging.info("📡 [FACE] Lancement exe : %s", " ".join(cmd))
+        logging.info("📡 [FACE] Lancement exe : %s", subprocess.list2cmdline(cmd))
         try:
             res = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",             # l'exe écrit de l'UTF-8 (emojis)
+                errors="replace",
                 timeout=30
             )
             logging.debug("STDOUT: %s", res.stdout.strip())
