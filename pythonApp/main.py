@@ -888,6 +888,24 @@ def process_fingerprint_actions(message):
     json_message = json.loads(message)
     logging.info("Received message from fingerprint actions topic from tenant %s: %s", tenant, message)
     required_keys = ["pin", "operation", "fingerprint_template", "finger_id"]
+
+    # Filtre de branche.
+    #
+    # Le topic fingerprint_actions_<tenant> est consommé par TOUS les postes du
+    # tenant, chacun poussant ensuite vers ses propres machines : un message
+    # atteignait donc toutes les branches. Or un adhérent ne doit être enrôlé
+    # que sur les branches couvertes par ses abonnements — et un SenseFace ne
+    # retient que 60 empreintes au total, capacité vite épuisée si tout le monde
+    # est diffusé partout.
+    #
+    # Le message porte désormais gymBranchId. Absent, on garde l'ancien
+    # comportement pour rester compatible avec les postes non encore à jour.
+    cible = json_message.get("gymBranchId")
+    if cible is not None and str(cible) != str(gym_branch_id):
+        logging.info("Empreinte ignorée : message destiné à la branche %s, "
+                     "ce poste est sur la branche %s", cible, gym_branch_id)
+        return
+
     machines = machineService.get_access_machines(gym_branch_id, tenant)
     if all(key in json_message for key in required_keys):
         for machine in machines:
@@ -1160,6 +1178,98 @@ def upload_face_multipart():
     }), status
 
 
+def pousser_gabarit_local(pin, template_bytes, finger_id):
+    """Pousse un gabarit vers toutes les machines de la branche COURANTE.
+
+    Extrait de /fingerprint/upload pour être partagé avec /fingerprint/push :
+    la logique de session C3 avait déjà été oubliée une fois dans un chemin sur
+    deux, ce qui a coûté un diagnostic entier. Un seul endroit désormais.
+
+    Retourne (resultats_par_ip, nb_succes, nb_machines).
+    """
+    resultats, succes, total = {}, 0, 0
+
+    for ctx in get_all_device_contexts():
+        branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+        if str(branch_id) != str(currentGymBranchId):
+            continue
+
+        total += 1
+        adapter = ctx.adapter
+        ip = ctx.machine.addresseip
+
+        try:
+            logging.info("Envoi de l'empreinte vers %s (id %s)", ip, ctx.machine.id)
+            with ctx.lock:
+                # Une session C3 ne répond que ~3,5 s : on la renouvelle DANS le
+                # verrou, sinon le thread temps réel consomme le premier appel.
+                if isinstance(adapter, PlcommAdapter):
+                    if not attempt_c3_reconnection(ctx, max_retries=2):
+                        raise ConnectionError(
+                            f"C3 {ip} : session non rétablie pour l'envoi d'empreinte")
+
+                ok = adapter.add_fingerprint(user_id=pin,
+                                             fingerprint_template=template_bytes,
+                                             finger_id=finger_id)
+
+            if ok:
+                resultats[ip] = "SUCCESS"
+                succes += 1
+                logging.info("Empreinte déposée sur %s", ip)
+            else:
+                resultats[ip] = "FAILED"
+                logging.error("Échec du dépôt d'empreinte sur %s", ip)
+        except Exception as exc:
+            resultats[ip] = f"ERROR: {exc}"
+            logging.error("Exception lors de l'envoi vers %s : %s", ip, exc)
+
+    return resultats, succes, total
+
+
+@app.route('/fingerprint/push', methods=['POST'])
+def push_fingerprint():
+    """Renvoie une empreinte DÉJÀ enregistrée vers les machines de cette branche.
+
+    Contrairement à /fingerprint/upload, ne capture rien : le gabarit vient du
+    serveur. Le fan-out vers les autres branches de l'adhérent est publié sur
+    Kafka par gym-management, qui seul connaît ses abonnements actifs.
+    """
+    try:
+        data = request.get_json() or {}
+        manquants = [c for c in ("pin", "template") if not data.get(c)]
+        if manquants:
+            return jsonify({"error": f"champ(s) requis manquant(s) : {', '.join(manquants)}"}), 400
+
+        pin = data["pin"]
+        finger_id = data.get("fingerId", data.get("finger_id"))
+        if finger_id is None:
+            return jsonify({"error": "champ requis manquant : fingerId"}), 400
+
+        try:
+            template_bytes = base64.b64decode(data["template"])
+        except Exception as exc:
+            return jsonify({"error": f"gabarit illisible (base64 attendu) : {exc}"}), 400
+
+        logging.info("Renvoi d'empreinte : PIN=%s doigt=%s (%s octets)",
+                     pin, finger_id, len(template_bytes))
+
+        resultats, succes, total = pousser_gabarit_local(pin, template_bytes, finger_id)
+
+        if total == 0:
+            return jsonify({"message": "Aucune machine active sur cette branche",
+                            "results": {}, "succeeded": 0, "total": 0}), 200
+        if succes == 0:
+            return jsonify({"error": f"Échec sur les {total} machine(s)",
+                            "results": resultats, "succeeded": 0, "total": total}), 500
+        statut = 200 if succes == total else 207
+        return jsonify({"message": f"Empreinte envoyée à {succes}/{total} machine(s)",
+                        "results": resultats, "succeeded": succes, "total": total}), statut
+
+    except Exception as exc:
+        logging.error("Erreur dans /fingerprint/push : %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route('/fingerprint/upload', methods=['POST'])
 def upload_fingerprint():
     try:
@@ -1180,47 +1290,34 @@ def upload_fingerprint():
         template_bytes, images = capture.capture_fingerprint(save_file=False)
 
         if not template_bytes:
-            return jsonify({"error": "Failed to capture fingerprint"}), 500
+            # « Failed to capture fingerprint » couvrait indistinctement une DLL
+            # absente, un lecteur débranché et un doigt mal posé. Le front — et
+            # surtout la personne devant l'écran — ne pouvait rien en faire.
+            cause = getattr(capture, "derniere_erreur", "") or \
+                "Capture interrompue : aucun template exploitable après 3 essais."
+            logging.error("Capture d'empreinte échouée pour le PIN %s — %s", pin, cause)
+            return jsonify({"error": "Failed to capture fingerprint",
+                            "cause": cause}), 500
 
         logging.info(f" Fingerprint captured successfully. Template size: {len(template_bytes)} bytes")
 
-        results = {}
-        success_count = 0
-        total_count = 0
-
-        for ctx in get_all_device_contexts():
-            machine_id = ctx.machine.id
-            branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
-            if str(branch_id) != str(currentGymBranchId):
-                continue
-
-            total_count += 1
-            adapter = ctx.adapter
-            machine_ip = ctx.machine.addresseip
-
-            try:
-                logging.info(f" Uploading to machine {machine_ip} (ID: {machine_id})")
-                with ctx.lock:
-                    success = adapter.add_fingerprint(
-                        user_id=pin,
-                        fingerprint_template=template_bytes,
-                        finger_id=finger_id
-                    )
-
-                if success:
-                    results[machine_ip] = "SUCCESS"
-                    success_count += 1
-                    logging.info(f" Fingerprint uploaded successfully to {machine_ip}")
-                else:
-                    results[machine_ip] = "FAILED"
-                    logging.error(f" Failed to upload fingerprint to {machine_ip}")
-            except Exception as e:
-                results[machine_ip] = f"ERROR: {str(e)}"
-                logging.error(f" Exception uploading to {machine_ip}: {e}")
+        results, success_count, total_count = pousser_gabarit_local(
+            pin, template_bytes, finger_id)
 
         python_bytes = bytes(bytearray(template_bytes))
         encoded_template = base64.b64encode(python_bytes).decode('utf-8')
-        payload = {"fingerprint_template": encoded_template, "pin": pin, "gymBranchId": gym_branch_id,
+        # Volontairement SANS gymBranchId : le filtre de branche ajouté dans
+        # process_fingerprint_actions ignore les messages destinés à une autre
+        # branche. Le renseigner ici ferait porter au message la branche qui
+        # vient déjà de recevoir l'empreinte en direct — il ne servirait plus à
+        # rien, et le fan-out de la capture disparaîtrait en silence.
+        #
+        # La capture continue donc de diffuser à toutes les branches du tenant,
+        # comme avant. Seuls les messages émis par gym-management (bouton de
+        # renvoi) portent une branche et sont donc ciblés.
+        # ⚠️ À revoir : cette diffusion large a le même défaut de capacité que
+        # celui qui a motivé le filtre (60 empreintes max sur un SenseFace).
+        payload = {"fingerprint_template": encoded_template, "pin": pin,
                    "operation": Operation.ADD_FINGERPRINT.value, "finger_id": finger_id}
 
         if success_count == 0:

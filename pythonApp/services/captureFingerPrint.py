@@ -7,15 +7,83 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Le SDK du lecteur d'empreintes appartient au PILOTE, pas a l'application.
+#
+# L'installeur ZKFinger depose dans System32 un ensemble indissociable :
+#
+#     libzkfp.dll                     API principale
+#     ZKFPCap.dll                     couche de capture
+#     fpslib.dll                      bibliotheque d'algorithme
+#     ZKFPSensors\libzklibcap.dll     plugins, charges par ZKFPCap.dll
+#     ZKFPSensors\libsilkidcap.dll      depuis un sous-dossier situe A COTE
+#     ZKFPSensors\libidfprcap.dll       d'elle-meme
+#
+# Copier les trois premieres a la racine de l'application SANS le dossier
+# ZKFPSensors donne un ensemble incomplet : ZKFPCap.dll se charge, ne trouve
+# pas ses plugins, et ZKFPM_Init() renvoie -1 (« Failed to initialize the
+# algorithm library »). C'est exactement ce qui est arrive le 2026-08-18 —
+# et le simple fait d'ajouter le dossier local en tete du chemin de recherche
+# suffisait a masquer l'installation System32, pourtant complete et valide.
+#
+# On ne prend donc un dossier local en compte que s'il porte l'ensemble
+# COMPLET. Sinon on ne touche a rien : l'ordre de recherche par defaut de
+# Windows trouvera l'installation du pilote.
+#
+# libzkfpcsharp.dll est un cas different : c'est le wrapper C# livre avec
+# l'application (et avec pyzkfp), pas un composant du pilote.
+# ---------------------------------------------------------------------------
+DLL_NATIVE = "libzkfp.dll"
+DOSSIER_PLUGINS = "ZKFPSensors"
+
+
+def _dossiers_candidats():
+    """Dossiers ou une installation LOCALE complete pourrait se trouver."""
+    ici = Path(__file__).resolve().parent          # .../services
+    racine = ici.parent                            # .../pythonApp
+    dossiers = [racine, racine / "_internal", ici]
+
+    meipass = getattr(sys, "_MEIPASS", None)       # extraction PyInstaller
+    if meipass:
+        dossiers.insert(0, Path(meipass))
+    if getattr(sys, "frozen", False):              # a cote de l'exe installe
+        dossiers.insert(0, Path(sys.executable).resolve().parent)
+
+    vus, uniques = set(), []
+    for d in dossiers:
+        if d and d.exists() and str(d) not in vus:
+            vus.add(str(d))
+            uniques.append(d)
+    return uniques
+
+
+def _ensemble_complet(dossier):
+    """Vrai si ce dossier porte la DLL native ET son dossier de plugins."""
+    return (dossier / DLL_NATIVE).exists() and (dossier / DOSSIER_PLUGINS).is_dir()
+
+
+def trouver_dll_native():
+    """Chemin d'une installation LOCALE complete, sinon None.
+
+    None ne veut pas dire « SDK absent » : l'installation du pilote dans
+    System32 reste le cas nominal et n'est pas listee ici.
+    """
+    for d in _dossiers_candidats():
+        if _ensemble_complet(d):
+            return d / DLL_NATIVE
+    return None
+
+
 def _prepare_dll_search_path():
-    # Dossier d’extraction PyInstaller (onefile) OU dossier du script en dev
-    base_dir = getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent))
-    if hasattr(os, "add_dll_directory"):
-        try:
-            os.add_dll_directory(base_dir)
-        except Exception:
-            pass
-    os.environ["PATH"] = base_dir + os.pathsep + os.environ.get("PATH", "")
+    for d in _dossiers_candidats():
+        if not _ensemble_complet(d):
+            continue          # ensemble partiel : surtout ne pas le prioriser
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(str(d))
+            except Exception:
+                pass
+        os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
 
 _prepare_dll_search_path()
 
@@ -32,6 +100,7 @@ from services.websocket import send_fingerprint
 class FingerprintCapture:
     def __init__(self):
         self.zk = None
+        self.derniere_erreur = ""     # cause exploitable pour l'appelant HTTP
 
     def initialize_device(self):
         """Initialize the fingerprint device"""
@@ -41,13 +110,29 @@ class FingerprintCapture:
             self.zk.Init()
 
             if self.zk.GetDeviceCount() < 1:
-                raise Exception("No fingerprint device detected!")
+                self.derniere_erreur = (
+                    "Aucun lecteur d'empreintes detecte. La DLL est presente : "
+                    "verifier que le lecteur est branche et reconnu par Windows."
+                )
+                logger.error(self.derniere_erreur)
+                return False
 
             self.zk.OpenDevice(0)
             logger.info("Fingerprint device initialized successfully")
             return True
 
         except Exception as e:
+            # Le SDK ne distingue pas « pilote absent » de « lecteur debranche » :
+            # les deux ressortent en ZKFPM_Init() = -1. On oriente donc vers la
+            # cause de loin la plus frequente, le pilote non installe — le lecteur
+            # d'empreintes est optionnel et rare dans le parc.
+            self.derniere_erreur = (
+                f"Initialisation du lecteur impossible : {e}. "
+                f"Le SDK ZKFinger appartient au PILOTE du lecteur, pas a "
+                f"l'application : verifier que le pilote est installe sur ce poste "
+                f"(il depose libzkfp.dll, ZKFPCap.dll, fpslib.dll et le dossier "
+                f"{DOSSIER_PLUGINS}\\ dans System32) et que le lecteur est branche."
+            )
             logger.error("Error initializing device: %s", e)
             return False
 
@@ -77,15 +162,36 @@ class FingerprintCapture:
         raise Exception(f"Failed to capture template {attempt_num} after {max_attempts} attempts")
 
     def merge_templates(self, templates):
-        """Merge three templates into a final template"""
+        """Fusionne les trois captures en un gabarit d'enrolement.
+
+        DBMerge rend un COUPLE (gabarit, longueur_reelle) — et la seconde
+        valeur n'est pas un code de retour malgre son ancien nom
+        `result_code` : c'est `regTempLen`, la longueur utile du gabarit.
+
+        Elle etait ignoree, donc on transmettait le tampon complet de
+        2048 octets aux pointeuses, dont ~850 octets de zeros de remplissage
+        (mesure sur une capture reelle : 1198 octets utiles sur 2048).
+        """
         try:
             merge_result = self.zk.DBMerge(templates[0], templates[1], templates[2])
-            if isinstance(merge_result, tuple):
-                if len(merge_result) >= 2:
-                    final_template, result_code  = merge_result[0], merge_result[1]
-                    return final_template
-            else:
+            if not isinstance(merge_result, tuple):
                 return merge_result
+
+            gabarit = merge_result[0]
+            longueur = merge_result[1] if len(merge_result) >= 2 else None
+
+            octets = bytes(gabarit)
+            if isinstance(longueur, int) and 0 < longueur <= len(octets):
+                utile = octets[:longueur]
+            else:
+                # Repli : on retire au moins le remplissage a zero.
+                utile = octets.rstrip(b"\x00") or octets
+                longueur = len(utile)
+
+            logger.info("Gabarit fusionne : %s octets utiles (tampon de %s)",
+                        len(utile), len(octets))
+            return utile
+
         except Exception as e:
             logger.error("Error merging templates: %s", e)
             logger.warning("Using first template as fallback")

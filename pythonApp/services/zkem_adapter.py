@@ -552,17 +552,23 @@ def zkem_last_error(zk) -> Union[int, str]:
     """
     Lecture robuste du code d'erreur, toutes versions SDK.
     """
-    try:                                    # firmware récent
-        return int(zk.GetLastError())
+    # GetLastError rend le code par PARAMÈTRE DE SORTIE. pywin32 le renvoie
+    # comme valeur de retour, à condition qu'on fournisse un argument
+    # d'emplacement — n'importe quel entier fait l'affaire.
+    #
+    # Les deux formes essayées auparavant échouaient toutes les deux, d'où
+    # 24 erreurs sur 24 en « err=? » depuis le 2026-08-14 :
+    #   - sans argument      -> com_error 0x8002000F « Paramètre non facultatif »
+    #   - VARIANT VT_BYREF   -> TypeError au marshaling
+    # Vérifié le 2026-08-18 sur un ZKEM réel, en liaison tardive comme précoce.
+    try:
+        return int(zk.GetLastError(0))
     except (TypeError, pywintypes.com_error) as ex_direct:
         first = ex_direct
 
-    # Firmware ancien : GetLastError renvoie le code par paramètre de sortie,
-    # qui doit être un VARIANT BYREF (un ctypes.c_long n'est pas marshalable).
+    # Reliquat : certaines versions n'acceptent que la forme sans argument.
     try:
-        err = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-        zk.GetLastError(err)
-        return err.value
+        return int(zk.GetLastError())
     except Exception as ex_byref:
         # Les deux formes échouent sur le SDK déployé (constaté en prod le
         # 2026-08-14 : 24 erreurs sur 24 en "?"). On journalise la vraie cause
