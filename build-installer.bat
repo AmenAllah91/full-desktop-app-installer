@@ -11,8 +11,44 @@ set ELECTRON_APP_DIR=electron-app
 set PYTHON_APP_DIR=pythonApp
 set SETUP_DLLS_DIR=setupDlls
 set RESOURCES_DIR=resources
+set VENV_PY=%~dp0%PYTHON_APP_DIR%\venv\Scripts\python.exe
+
+:: =======================
+:: Cible de deploiement — PRODUCTION par defaut
+:: =======================
+:: Le .env livre etait auparavant celui du poste de developpement : il n'etait
+:: genere que "if not exist", puis copie tel quel dans l'installeur. Un poste
+:: configure sur l'integration produisait donc un installeur qui expediait les
+:: pointages des clients vers l'environnement de test, ou ils etaient rejetes
+:: faute d'adherents correspondants. La cible est desormais explicite et le
+:: fichier livre est toujours regenere.
+::
+::   build-installer.bat        -> PRODUCTION (defaut)
+::   build-installer.bat int    -> INTEGRATION (tests internes, choix delibere)
+set TARGET=%~1
+if "%TARGET%"=="" set TARGET=prod
+
+if /i "%TARGET%"=="prod" (
+    set TARGET_LABEL=PRODUCTION
+    set ENV_BASE_URL=https://app.yogym.co
+    set ENV_KAFKA_BROKER=51.178.55.238:9094
+) else if /i "%TARGET%"=="int" (
+    set TARGET_LABEL=INTEGRATION - tests internes
+    set ENV_BASE_URL=https://integration.yogym.co
+    set ENV_KAFKA_BROKER=54.38.35.221:9094
+) else (
+    echo ❌ Cible inconnue : "%TARGET%"
+    echo    Valeurs acceptees : prod ^(defaut^) ou int
+    exit /b 1
+)
 
 echo 🛠️  Starting automated build process for %APP_NAME% v%VERSION%
+echo.
+echo ==========================================================
+echo   CIBLE : %TARGET_LABEL%
+echo   YOGYM_BASE_URL = %ENV_BASE_URL%
+echo   KAFKA_BROKER   = %ENV_KAFKA_BROKER%
+echo ==========================================================
 echo.
 echo 📂 Current directory: %cd%
 echo 📂 Python directory: %cd%\%PYTHON_APP_DIR%
@@ -41,52 +77,38 @@ if not exist "venv" (
     echo ✅ Virtual environment created.
 )
 
-:: Activate venv
-call venv\Scripts\activate
-
-:: Install dependencies
+:: Installation des dependances : on appelle le python du venv par son chemin
+:: explicite. L'ancien "call venv\Scripts\activate" suivi de "call deactivate"
+:: desactivait le venv AVANT l'appel a PyInstaller plus bas, qui tournait donc
+:: sur le Python global, sans aucune des dependances de l'application.
 if exist "requirements.txt" (
     echo 📦 Installing Python dependencies...
-    pip install -r requirements.txt
+    "%VENV_PY%" -m pip install -r requirements.txt
 ) else (
     echo ⚠️ requirements.txt not found! Make sure dependencies are installed manually.
 )
-call deactivate
 
-:: Step: Generate .env directly
-if not exist ".env" (
-    echo Creating .env file...
+:: PyInstaller est un outil de build, pas une dependance applicative : on
+:: l'installe dans le venv sans l'ajouter a requirements.txt.
+echo 📦 Ensuring PyInstaller is available...
+"%VENV_PY%" -m pip install pyinstaller
 
-    (
-    echo KAFKA_BROKER=51.178.55.238:9094
-    echo KAFKA_GROUP_ID=group_c
-    echo KAFKA_TOPIC=rt_
-    echo GYM_BRANCH_ID=2
-    echo TENANT=empiregym
-    echo.
-    echo FLASK_HOST=0.0.0.0
-    echo FLASK_PORT=9998
-    echo.
-    echo PLCOMPRO_URL=plcommpro.dll
-    ) > ".env"
-
-    echo .env file created successfully
-) else (
-    echo ℹ️ .env already exists, skipping creation
-)
+:: Le .env livre n'est PLUS produit ici : il est genere dans le repertoire de
+:: staging juste avant l'empaquetage NSIS, a partir de la cible choisie. Le
+:: pythonApp\.env du poste sert uniquement au developpement local et ne quitte
+:: jamais la machine.
 
 
 
 
 
 
-python -m PyInstaller --onedir --noupx --name=pythonApp main.py --hidden-import=Crypto --hidden-import=Crypto.Cipher --hidden-import=Crypto.Hash --hidden-import=Crypto.Random --hidden-import=Crypto.Util --collect-all certifi
+"%VENV_PY%" -m PyInstaller --onedir --noupx --name=pythonApp main.py --hidden-import=Crypto --hidden-import=Crypto.Cipher --hidden-import=Crypto.Hash --hidden-import=Crypto.Random --hidden-import=Crypto.Util --collect-all certifi
 if errorlevel 1 (
     echo ❌ Failed to build Python app!
     exit /b 1
 )
 xcopy /e /i /y "dist\pythonApp" "..\%OUTPUT_DIR%\python\"
-copy /y ".env" "..\%OUTPUT_DIR%\python\"
 copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
 cd ..
@@ -118,7 +140,7 @@ if not exist "%SETUP_DLLS_DIR%" (
 :build_setup_dlls
 echo 🔨 Building setupDlls.exe...
 if exist "setupDlls.py" (
-    python -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
+    "%VENV_PY%" -m PyInstaller --onefile --name=setupDlls.exe setupDlls.py
 ) else (
     echo ❌ setupDlls.py not found in %cd%!
     dir *.py /b
@@ -301,6 +323,32 @@ if exist "python\pythonApp.exe" (
     echo ⚠️ Warning: pythonApp.exe not found!
 )
 
+:: Le .env livre est genere ICI, systematiquement, a partir de la cible choisie
+:: en tete de script. Il n'est jamais copie depuis le poste de developpement.
+echo 📝 Generating .env for target: %TARGET_LABEL%
+(
+echo # Genere automatiquement par build-installer.bat - cible : %TARGET_LABEL%
+echo # Ne pas editer a la main : toute modification sera ecrasee a la mise a jour.
+echo #
+echo # Racine de la plateforme : lue par le pont Python ET par Electron.
+echo YOGYM_BASE_URL=%ENV_BASE_URL%
+echo.
+echo KAFKA_BROKER=%ENV_KAFKA_BROKER%
+echo KAFKA_GROUP_ID=group_c
+echo KAFKA_TOPIC=rt_pointage
+echo.
+echo # PAS de TENANT ni de GYM_BRANCH_ID ici, deliberement. Ce fichier est
+echo # identique sur tous les postes : y laisser une identite ferait demarrer
+echo # un poste vikingsgym sous celle d'empiregym. Les deux valeurs sont saisies
+echo # a la premiere ouverture de YoGym, poste par poste, et le pont REFUSE de
+echo # demarrer si elles manquent.
+echo.
+echo FLASK_HOST=0.0.0.0
+echo FLASK_PORT=9998
+echo.
+echo PLCOMPRO_URL=plcommpro.dll
+) > "installer\.env"
+
 if exist "setup\setupDlls.exe" (
     echo Copying setupDlls...
     copy /y "setup\setupDlls.exe" "installer\"
@@ -310,8 +358,14 @@ if exist "setup\setupDlls.exe" (
 
     if exist "..\pythonApp\getuserfacephoto" (
         echo Copying getuserfacephoto folder...
+:: resource_path() resout vers sys._MEIPASS, soit _internal\ depuis
+:: PyInstaller 6 (l'exe reste a la racine, tout le reste part dans
+:: _internal). On copie donc aux DEUX emplacements pour rester
+:: compatible avec les deux dispositions.
         mkdir "installer\getuserfacephoto" 2>nul
         copy /y "..\pythonApp\getuserfacephoto\*" "installer\getuserfacephoto\"
+        mkdir "installer\_internal\getuserfacephoto" 2>nul
+        copy /y "..\pythonApp\getuserfacephoto\*" "installer\_internal\getuserfacephoto\"
     ) else (
         echo  getuserfacephoto folder not found!
     )
@@ -352,6 +406,10 @@ echo 📝 Generating NSIS installer script...
     echo.
     echo Section "Main Application"
     echo   SetOutPath "$INSTDIR"
+    echo   ; Le .env porte l'environnement cible. SetOverwrite ifnewer compare les
+    echo   ; horodatages, et copy preserve celui de la source : un .env perime
+    echo   ; pouvait donc survivre a une mise a jour. On le supprime d'abord.
+    echo   Delete "$INSTDIR\.env"
     echo   SetOverwrite ifnewer
     echo   File /r "*.*"
     echo   CreateDirectory "$INSTDIR\logs"

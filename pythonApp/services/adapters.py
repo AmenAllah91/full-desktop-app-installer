@@ -1,10 +1,14 @@
 # services/adapters.py
 import base64
+import functools
+import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 import logging, time, ctypes, os
 from ctypes import *
+from services.addAndAuthorizeUser import CONNECT_TIMEOUT_MS
 import platform
+
 
 
 # -------------------------------------------------------- Types machine
@@ -99,6 +103,24 @@ plcommpro.ControlDevice.argtypes = [
     c_char_p    # Options
 ]
 plcommpro.ControlDevice.restype = c_int
+plcommpro.PullLastError.restype = c_int
+
+
+# -2 = DÉPASSEMENT DE DÉLAI, et non un refus de la commande.
+# PullSDK User Guide : « When the query result contains the error code of -2,
+# you should set timeout to a larger value ». D'où CONNECT_TIMEOUT_MS=20000.
+# On le distingue quand même d'un vrai refus : une commande expirée doit être
+# rejouée, pas détruite.
+SDK_TIMEOUT = -2
+
+
+def _pull_last_error():
+    """Vrai code d'erreur du Pull SDK, à défaut duquel les échecs sont muets."""
+    try:
+        return plcommpro.PullLastError()
+    except Exception:
+        return "?"
+
 
 class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
     def __init__(self, machine):
@@ -109,9 +131,11 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
         if self.handle:
             return self.handle
         ip, port = self.machine.addresseip, self.machine.port
-        com_key = getattr(self.machine, "comKey", None) or ""
+        # passwd PRÉSENT et VIDE, et timeout large : voir connect_to_device()
+        # dans addAndAuthorizeUser.py pour le détail (le -2 est un dépassement
+        # de délai, la doc PullSDK recommande 20000).
         params = (f"protocol=TCP,ipaddress={ip},port={port},"
-                  f"timeout=4000,passwd={com_key}").encode()
+                  f"timeout={CONNECT_TIMEOUT_MS},passwd=").encode()
         for i in range(1, max_attempts + 1):
             logging.info("PLComm connect %s (%s/%s)", ip, i, max_attempts)
             h = plcommpro.Connect(params)
@@ -119,6 +143,8 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
                 self.handle = h
                 logging.info("✅ Connected %s (handle=%s)", ip, h)
                 return h
+            logging.warning("PLComm connect KO %s (%s/%s) PullLastError=%s",
+                            ip, i, max_attempts, _pull_last_error())
             time.sleep(1)
         logging.error("❌ Unable to connect %s", ip)
         return None
@@ -136,23 +162,48 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
 
     # ------------- helpers internes
     def _set(self, table: bytes, data: str) -> bool:
+        # Le code de retour n'était pas journalisé : un ADD_USER en échec se
+        # résumait à « SDK a renvoyé False », sans le moindre indice sur la
+        # cause réelle côté panneau.
         if not self.handle:
+            logging.error("PLComm SetDeviceData %s : aucun handle disponible",
+                          self.machine.alias)
             return False
         try:
-            return plcommpro.SetDeviceData(
-                self.handle, table, data.encode(), b"") == 0
+            ret = plcommpro.SetDeviceData(self.handle, table, data.encode(), b"")
         except OSError as exc:
-            logging.error("PLComm _set crash %s : %s",
-                          self.machine.alias, exc)
+            logging.error("PLComm _set crash %s : %s", self.machine.alias, exc)
             self.disconnect()
             return False
 
+        # ConnectionError hérite d'OSError : levée à l'intérieur du try
+        # ci-dessus, elle aurait été rattrapée puis convertie en False, et la
+        # tâche détruite au lieu d'être rejouée.
+        if ret == SDK_TIMEOUT:
+            raise ConnectionError(
+                f"C3 {self.machine.addresseip} délai dépassé (SetDeviceData={ret}) — "
+                f"commande à rejouer")
+
+        if ret != 0:
+            logging.error("PLComm SetDeviceData(%s) KO sur %s — ret=%s "
+                          "PullLastError=%s — data=%s",
+                          table.decode(), self.machine.addresseip, ret,
+                          _pull_last_error(), data[:150])
+        return ret == 0
+
     def _del(self, table: bytes, cond: str) -> bool:
         if not self.handle:
+            logging.error("PLComm DeleteDeviceData %s : aucun handle disponible",
+                          self.machine.alias)
             return False
         try:
-            return plcommpro.DeleteDeviceData(
-                self.handle, table, cond.encode(), None) == 0
+            ret = plcommpro.DeleteDeviceData(self.handle, table, cond.encode(), None)
+            if ret != 0:
+                logging.error("PLComm DeleteDeviceData(%s) KO sur %s — ret=%s "
+                              "PullLastError=%s — cond=%s",
+                              table.decode(), self.machine.addresseip, ret,
+                              _pull_last_error(), cond[:150])
+            return ret == 0
         except OSError as exc:
             logging.error("PLComm _del crash %s : %s",
                           self.machine.alias, exc)

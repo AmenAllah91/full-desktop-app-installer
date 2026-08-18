@@ -2,12 +2,17 @@
 import os
 import requests
 
+from config import YOGYM_BASE_URL
 from domain import AccessMachine
 
 
 class AccessMachineService:
     def __init__(self, base_url=None, timeout=5):
-        self.base_url = base_url or os.getenv("API_BASE_URL", "https://app.yogym.co/gym-management/public")
+        # Dérivé de YOGYM_BASE_URL. API_BASE_URL reste accepté pour surcharger
+        # ce seul service sans toucher au reste.
+        self.base_url = (base_url
+                         or os.getenv("API_BASE_URL")
+                         or f"{YOGYM_BASE_URL}/gym-management/public")
         self.session = requests.Session()
         self.timeout = timeout
 

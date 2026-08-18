@@ -27,6 +27,10 @@ class DeviceContext:
         else:
             raise ValueError(f"Type inconnu : {machine.type}")
 
+    # Un C3 ne délivre QU'UN SEUL handle à la fois : en ouvrir un second fait
+    # tomber les deux connexions. Le handle du thread temps réel est donc
+    # l'unique session, et il est partagé avec l'adapter pour que les commandes
+    # l'empruntent au lieu d'en ouvrir une autre.
     def bind_handle(self, h=None):
         """Spécifique aux C3 : copie le handle partagé dans l'adapter"""
         self.handle = h

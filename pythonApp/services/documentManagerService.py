@@ -5,6 +5,8 @@ from pathlib import Path
 
 import requests
 
+from config import YOGYM_BASE_URL
+
 
 class DocumentManagerService:
     """
@@ -16,10 +18,11 @@ class DocumentManagerService:
     """
 
     def __init__(self, base_url=None, timeout=15):
-        self.base_url = (base_url or os.getenv(
-            "DOCUMENT_MANAGER_URL",
-            "https://app.yogym.co/document-management"
-        )).rstrip("/")
+        # Dérivé de YOGYM_BASE_URL. DOCUMENT_MANAGER_URL reste accepté pour
+        # surcharger ce seul service sans toucher au reste.
+        self.base_url = (base_url
+                         or os.getenv("DOCUMENT_MANAGER_URL")
+                         or f"{YOGYM_BASE_URL}/document-management").rstrip("/")
         self.session = requests.Session()
         self.timeout = timeout
 

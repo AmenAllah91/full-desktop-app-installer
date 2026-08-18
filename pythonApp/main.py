@@ -18,6 +18,7 @@ from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
 from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter, MachineType
+from services.common import zk_sdk_lock, tcp_reachable
 from services.captureFingerPrint import FingerprintCapture
 from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
@@ -65,6 +66,10 @@ def initialize_env_file():
     """Initialize the .env file with default values if it doesn't exist."""
     if not os.path.exists(ENV_FILE_PATH):
         default_env_content = """# .env
+
+# Racine de la plateforme : seule ligne à changer pour basculer d'environnement.
+YOGYM_BASE_URL=https://app.yogym.co
+
 KAFKA_BROKER=51.178.55.238:9094
 KAFKA_GROUP_ID=group_c
 KAFKA_TOPIC=rt_pointage
@@ -74,7 +79,6 @@ FLASK_HOST=0.0.0.0
 FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
-DOCUMENT_MANAGER_URL=https://app.yogym.co/document-management
 """
         with open(ENV_FILE_PATH, 'w') as f:
             f.write(default_env_content)
@@ -106,13 +110,90 @@ CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["*"], methods=["GE
 def add_private_network_headers(response):
     response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
-currentGymBranchId = int(os.getenv("GYM_BRANCH_ID"))
-tenant = os.getenv("TENANT")
+
+
+# Werkzeug sert chaque requête dans un thread neuf, et plusieurs endpoints
+# touchent le SDK ZK (photo, porte, empreintes) voire créent un objet COM
+# (get_fingerprints_api enregistre une machine en repli). Un thread qui n'a pas
+# initialisé COM n'a pas le droit d'en créer : sans ça l'appel échoue, ou pire
+# « marche » en vtable brute jusqu'au jour où il cesse de marcher.
+@app.before_request
+def _com_initialize_request_thread():
+    try:
+        pythoncom.CoInitialize()
+    except Exception as exc:
+        logging.debug("CoInitialize ignoré sur ce thread : %s", exc)
+
+
+@app.teardown_request
+def _com_uninitialize_request_thread(exc=None):
+    try:
+        pythoncom.CoUninitialize()
+    except Exception:
+        pass
+# ------------------------------------------------------------------ #
+# Identité de l'instance : tenant + club.
+#
+# Elle DOIT être résolue ici, avant la création des KafkaService, car elle
+# détermine leur group.id. sys.argv fait foi — c'est Electron qui passe le
+# tenant et le gymBranchId saisis à l'installation. Le .env n'est qu'un repli
+# pour les lancements manuels : il est identique dans tous les installeurs,
+# s'en servir ferait rejoindre le même consumer group à tous les postes de
+# tous les clubs, et un seul d'entre eux recevrait chaque message.
+# ------------------------------------------------------------------ #
+def _resolve_identity() -> tuple[str, str]:
+    """
+    Identité du poste : tenant + club, fournis par Electron en arguments.
+
+    AUCUN REPLI, volontairement. Le `.env` est identique dans tous les
+    installeurs : s'en servir ferait démarrer un poste vikingsgym sous l'identité
+    empiregym — pointages écrits dans la mauvaise base, et consumer group partagé
+    entre clubs qui se voleraient les messages. Une chaîne vide est `falsy` en
+    Python, donc l'ancien `argv or getenv(...)` basculait sur le repli dès que le
+    formulaire Electron était validé à vide. Mieux vaut refuser de démarrer.
+    """
+    argv_tenant = sys.argv[1].strip() if len(sys.argv) >= 2 else ""
+    argv_branch = sys.argv[2].strip() if len(sys.argv) >= 3 else ""
+
+    manquants = []
+    if not argv_tenant:
+        manquants.append("tenant")
+    if not argv_branch:
+        manquants.append("gymBranchId")
+
+    if manquants:
+        msg = (
+            "DEMARRAGE REFUSE : " + " et ".join(manquants) + " non fourni(s). "
+            "Usage : pythonApp.exe <tenant> <gymBranchId>. "
+            "Ces deux valeurs sont saisies a la premiere ouverture de YoGym et "
+            "conservees dans config.json. Aucune valeur par defaut n'est "
+            "appliquee : un repli ferait tourner ce poste sous l'identite d'un "
+            "autre club."
+        )
+        print(msg, file=sys.stderr, flush=True)
+        logging.critical(msg)
+        sys.exit(2)
+
+    return argv_tenant, argv_branch
+
+
+tenant, currentGymBranchId = _resolve_identity()
 
 # Kafka service configuration
-pointage_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"pointage_group{currentGymBranchId}")
-publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"photo_publish_group{currentGymBranchId}")
-fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker, group_id=f"fingerprint_group{currentGymBranchId}")
+# group.id unique par tenant + club : chaque poste doit recevoir TOUS les
+# messages de son club, jamais une part répartie entre postes.
+# auto.offset.reset=latest : ces topics portent des commandes, pas un
+# historique à rejouer — au premier démarrage on part de maintenant.
+_KAFKA_GROUP_SUFFIX = f"{tenant}_{currentGymBranchId}"
+pointage_kafka = KafkaService(kafka_broker=KafkaBroker,
+                              group_id=f"pointage_{_KAFKA_GROUP_SUFFIX}",
+                              auto_offset_reset="latest")
+publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker,
+                                   group_id=f"photo_publish_{_KAFKA_GROUP_SUFFIX}",
+                                   auto_offset_reset="latest")
+fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker,
+                                 group_id=f"fingerprint_{_KAFKA_GROUP_SUFFIX}",
+                                 auto_offset_reset="latest")
 
 machineService = AccessMachineService()
 
@@ -123,6 +204,13 @@ stop_event_monitoring = threading.Event()
 stop_event_kafka = threading.Event()
 monitoring_success = threading.Event()
 device_queue = Queue()
+
+# Renseignés au démarrage dans __main__, lus par /restart et par le thread de
+# rafraîchissement des machines.
+watchdog = None
+adms_server = None
+
+APP_STARTED_AT = time.time()
 
 # Configuration constants
 DEVICE_IP = os.getenv("DEVICE_IP")
@@ -146,16 +234,27 @@ class MachineWatchdog:
     Surveille les threads de monitoring (C3 et ZKEM).
     Si un thread meurt → backoff exponentiel → redémarrage automatique.
     S'arrête proprement quand stop_event_monitoring est déclenché.
+
+    Ne juge QUE la vivacité du thread. L'ancienneté du dernier pointage n'est pas
+    un critère de santé : une salle vide n'est pas une machine en panne. La santé
+    de la session est évaluée par les monitors eux-mêmes (TCP + RegEvent).
     """
 
     BASE_DELAY = 5
     MAX_DELAY  = 300
     CHECK_INTERVAL = 10
-    ZOMBIE_TIMEOUT = 300
 
     def __init__(self):
         # { machine_id: { "thread": Thread, "factory": callable, "delay": int } }
         self._entries: dict = {}
+        # Le rafraîchissement périodique des machines enregistre à chaud, pendant
+        # que _watch_loop parcourt le dict. Sans verrou ni copie, on récolte un
+        # "dictionary changed size during iteration" qui tue le watchdog.
+        self._lock = threading.Lock()
+        # Horodatage du dernier tour de boucle, exposé par /health : c'est ce
+        # qui permet à Electron de distinguer « process vivant » de « process
+        # vivant mais figé », le cas que personne ne détectait jusqu'ici.
+        self.last_tick = time.time()
         self._watcher = threading.Thread(
             target=self._watch_loop,
             daemon=True,
@@ -169,93 +268,243 @@ class MachineWatchdog:
         """
         t = factory()
         t.start()
-        self._entries[machine_id] = {
-            "thread":  t,
-            "factory": factory,
-            "delay":   self.BASE_DELAY,
-        }
+        with self._lock:
+            self._entries[machine_id] = {
+                "thread":   t,
+                "factory":  factory,
+                "delay":    self.BASE_DELAY,
+                "retry_at": 0.0,
+            }
         logging.info("🐕 Watchdog enregistré — machine %s (%s)", machine_id, t.name)
+
+    def is_registered(self, machine_id: int) -> bool:
+        with self._lock:
+            return machine_id in self._entries
 
     def start(self) -> None:
         self._watcher.start()
         logging.info("🐕 Watchdog démarré")
 
-    def _get_adapter(self, machine_id: int):
-        ctx = DeviceManager.get(machine_id)
-        if ctx:
-            return ctx.adapter
-        try:
-            from services.v2.device_manager_v2 import DeviceManagerV2
-            ctx2 = DeviceManagerV2.get(machine_id)
-            if ctx2:
-                return ctx2.adapter
-        except Exception:
-            pass
-        return None
-
     def _watch_loop(self) -> None:
         while not stop_event_monitoring.is_set():
             time.sleep(self.CHECK_INTERVAL)
+            self.last_tick = time.time()
 
-            for mid, entry in self._entries.items():
-                if stop_event_monitoring.is_set():
-                    break
-
-                thread = entry["thread"]
-                thread_alive = thread.is_alive()
-                is_zombie = False
-
-                if thread_alive:
-                    adapter = self._get_adapter(mid)
-                    if adapter is not None and adapter.last_seen is not None:
-                        elapsed = time.time() - adapter.last_seen
-                        if elapsed >= self.ZOMBIE_TIMEOUT:
-                            is_zombie = True
-                            logging.error(
-                                "🧟 [Watchdog] Thread ZOMBIE — machine %s, "
-                                "dernier événement il y a %.0fs (seuil=%ss)",
-                                mid, elapsed, self.ZOMBIE_TIMEOUT
-                            )
-
-                if not thread_alive or is_zombie:
-                    delay = entry["delay"]
-
-                    if not thread_alive:
-                        logging.error(
-                            "💀 [Watchdog] Thread mort — machine %s, "
-                            "redémarrage dans %ss", mid, delay
-                        )
-                    else:
-                        logging.error(
-                            "🧟 [Watchdog] Redémarrage thread zombie — "
-                            "machine %s dans %ss", mid, delay
-                        )
-
-                    elapsed = 0
-                    while elapsed < delay and not stop_event_monitoring.is_set():
-                        time.sleep(1)
-                        elapsed += 1
-
-                    if stop_event_monitoring.is_set():
-                        break
-
-                    if thread_alive and is_zombie:
-                        logging.info(
-                            "🪦 [Watchdog] Attente arrêt ancien thread zombie %s...", mid
-                        )
-
-                    new_thread = entry["factory"]()
-                    new_thread.start()
-                    entry["thread"] = new_thread
-                    entry["delay"] = min(delay * 2, self.MAX_DELAY)
-                    logging.info(
-                        "♻️ [Watchdog] Thread redémarré — machine %s (%s)",
-                        mid, new_thread.name
-                    )
-                else:
-                    entry["delay"] = self.BASE_DELAY
+            try:
+                self._check_all()
+            except Exception:
+                # Le watchdog est le seul à relancer les monitors : s'il meurt,
+                # plus aucune machine n'est surveillée et personne n'est prévenu.
+                # Il ne doit donc jamais sortir de sa boucle sur une exception.
+                logging.exception("💥 [Watchdog] Erreur dans la boucle de surveillance")
 
         logging.info("🛑 [Watchdog] Arrêté")
+
+    def _check_all(self) -> None:
+        # Copie sous verrou : le thread de rafraîchissement peut enregistrer une
+        # nouvelle machine pendant qu'on parcourt.
+        with self._lock:
+            entries = list(self._entries.items())
+
+        now = time.time()
+        for mid, entry in entries:
+            if stop_event_monitoring.is_set():
+                return
+
+            if entry["thread"].is_alive():
+                entry["delay"] = self.BASE_DELAY
+                entry["retry_at"] = 0.0
+                continue
+
+            # Backoff NON BLOQUANT : on note l'échéance et on passe à la machine
+            # suivante. L'ancienne version dormait ici jusqu'à MAX_DELAY, donc
+            # une seule machine éteinte — situation normale en salle — privait
+            # tout le reste du parc de surveillance pendant 5 minutes.
+            if now < entry.get("retry_at", 0.0):
+                continue
+
+            delay = entry["delay"]
+            new_thread = entry["factory"]()
+            new_thread.start()
+            entry["thread"] = new_thread
+            entry["delay"] = min(delay * 2, self.MAX_DELAY)
+            entry["retry_at"] = now + entry["delay"]
+            logging.info(
+                "♻️ [Watchdog] Thread relancé — machine %s (%s), "
+                "prochaine tentative dans %ss si nouvel échec",
+                mid, new_thread.name, entry["delay"]
+            )
+
+
+# ------------------------------------------------------------------ #
+# Liste des machines : récupération résiliente et rafraîchissement
+# ------------------------------------------------------------------ #
+
+def is_probe_safe(machine) -> bool:
+    """
+    Peut-on ouvrir une socket de test vers cette machine sans la perturber ?
+
+    Non pour les C3 : le panneau ne délivre qu'un seul handle à la fois, et
+    toute connexion parallèle sur son port SDK fait tomber la session du thread
+    temps réel. Les terminaux ZKEM, eux, tolèrent la sonde.
+    """
+    return getattr(machine, "type", None) != "C3"
+
+
+def machine_ready_for_requeue(machine) -> bool:
+    """
+    La machine peut-elle reprendre les tâches mises de côté ?
+
+    Pour un C3, la réponse ne peut pas venir d'une sonde TCP (voir is_probe_safe) :
+    l'indicateur est la session du thread temps réel. Si elle est établie, le
+    panneau répond.
+
+    Sans ce cas particulier, is_probe_safe écartait les C3 de tout requeue : une
+    tâche C3 mise en attente n'était jamais rejouée et finissait purgée au bout de
+    quelques heures, silencieusement.
+    """
+    if not is_probe_safe(machine):
+        ctx = DeviceManager.get(machine.id)
+        return ctx is not None and ctx.handle is not None
+    return tcp_reachable(machine.addresseip, machine.port)
+
+
+def fetch_machines_with_retry(tenant: str, gym_branch_id: str,
+                              max_wait: int = 300) -> list:
+    """
+    Récupère la liste des machines en insistant tant que le réseau n'est pas prêt.
+
+    Un PC qui démarre lance YoGym avant que le DNS ne réponde : get_access_machines
+    levait alors une exception, le `try` de __main__ la relançait, et le pont
+    mourait sans que personne ne le redémarre.
+
+    Passé max_wait, on démarre à vide plutôt que de bloquer : Flask et le
+    WebSocket montent, et refresh_machines_loop récupère les machines dès que
+    le réseau revient.
+    """
+    delay, waited = 2, 0
+    while True:
+        try:
+            return machineService.get_access_machines(gym_branch_id, tenant)
+        except Exception as exc:
+            if waited >= max_wait:
+                logging.error(
+                    "❌ Liste des machines toujours indisponible après %ss (%s) — "
+                    "démarrage à vide, le rafraîchissement périodique prendra le relais",
+                    waited, exc
+                )
+                return []
+            logging.warning(
+                "⏳ Liste des machines indisponible (%s) — nouvel essai dans %ss",
+                exc, delay
+            )
+            time.sleep(delay)
+            waited += delay
+            delay = min(delay * 2, 30)
+
+
+def register_machine_monitor(wd: "MachineWatchdog", m, ctx,
+                             tenant: str, gym_branch_id: str,
+                             adms_server=None) -> None:
+    """Enregistre auprès du watchdog le thread de monitoring adapté au type."""
+    if m.type == "C3":
+        def factory(ctx=ctx):
+            return threading.Thread(
+                target=monitor_machine,
+                args=(ctx, stop_event_monitoring),
+                daemon=True,
+                name=f"RT-C3-{ctx.machine.addresseip}")
+
+    elif m.type == "PUSH":
+        adapter = ctx.adapter
+        if adms_server:
+            adms_server.register_adapter(adapter)
+        else:
+            logging.warning(
+                "⚠️ Machine PUSH %s sans serveur ADMS actif — "
+                "redémarrer le pont pour l'activer", m.addresseip)
+
+        def factory(m=m, adapter=adapter):
+            return threading.Thread(
+                target=monitor_adms,
+                args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
+                daemon=True,
+                name=f"RT-PUSH-{m.addresseip}")
+
+    else:  # STANDALONE_NEW_FIRMWARE
+        def factory(m=m):
+            return threading.Thread(
+                target=monitor_zkem,
+                args=(m, m.addresseip, m.port, 1,
+                      stop_event_monitoring, tenant, gym_branch_id),
+                daemon=True,
+                name=f"RT-ZK-{m.addresseip}")
+
+    wd.register(m.id, factory)
+
+
+def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str,
+                          adms_server=None, interval: int = 300) -> None:
+    """
+    Relit périodiquement la configuration des machines.
+
+    Elle n'était lue qu'au démarrage : une machine ajoutée en back-office restait
+    inconnue du pont, et ses tâches d'accès étaient marquées COMPLETED sans avoir
+    jamais été exécutées — 164 pertes constatées en 22 h sur un seul poste.
+
+    On ne traite que les ajouts. Retirer une machine à chaud demanderait un
+    stop_event par machine ; on se contente de le signaler.
+    """
+    # DeviceManager.register construit un ZkemAdapter, donc un objet COM :
+    # comme tout thread qui touche au SDK, celui-ci doit initialiser COM.
+    pythoncom.CoInitialize()
+    try:
+        while not stop_event_monitoring.wait(interval):
+            try:
+                machines = machineService.get_access_machines(gym_branch_id, tenant)
+            except Exception as exc:
+                logging.warning("⚠️ Rafraîchissement des machines impossible : %s", exc)
+                continue
+
+            if not machines:
+                continue
+
+            seen = set()
+            for m in machines:
+                seen.add(m.id)
+
+                if DeviceManager.get(m.id) is None:
+                    logging.info(
+                        "🆕 Nouvelle machine détectée — id=%s alias=%s ip=%s type=%s",
+                        m.id, m.alias, m.addresseip, m.type
+                    )
+                    ctx = DeviceManager.register(m, tenant, gym_branch_id)
+                    register_machine_monitor(wd, m, ctx, tenant, gym_branch_id,
+                                             adms_server)
+
+                # Une machine peut être revenue après une coupure de courant :
+                # on rejoue alors ce qui avait été mis de côté en son absence.
+                if machine_ready_for_requeue(m):
+                    requeued = requeue_tasks_for_machine(m.id)
+                    if requeued:
+                        logging.info("♻️ %s tâche(s) rejouée(s) — machine %s (%s) "
+                                     "de nouveau joignable",
+                                     requeued, m.id, m.addresseip)
+
+            purged = purge_orphan_deferred_tasks(seen)
+            if purged:
+                logging.warning("🗑️ %s tâche(s) supprimée(s) : leur machine n'est "
+                                "plus déclarée par le cloud (désactivée)", purged)
+
+            for ctx in list(DeviceManager.all()):
+                if ctx.machine.id not in seen:
+                    logging.warning(
+                        "⚠️ Machine %s (%s) absente de la configuration cloud — "
+                        "monitoring toujours actif, redémarrer le pont pour l'arrêter",
+                        ctx.machine.id, ctx.machine.addresseip
+                    )
+    finally:
+        pythoncom.CoUninitialize()
 
 
 # ------------------------------------------------------------------ #
@@ -305,6 +554,81 @@ def mark_task_as_completed(task_id):
     conn.commit()
     conn.close()
     delete_completedTasks()
+
+
+def defer_task(task_id):
+    """
+    Met une tâche de côté en attendant que sa machine soit connue.
+
+    Elle était auparavant marquée COMPLETED, donc perdue définitivement : 41
+    demandes d'accès ont ainsi disparu en une journée pour une machine que
+    l'API publique ne renvoie pas (statut != Active) mais que le backend
+    continue de désigner dans ses messages Kafka. On ne peut pas la laisser en
+    PENDING — la file est FIFO, elle bloquerait tout ce qui suit — d'où ce
+    statut distinct.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("UPDATE task_queue SET status = 'WAITING_MACHINE' WHERE id = ?",
+                 (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def requeue_tasks_for_machine(machine_id) -> int:
+    """Réactive les tâches mises de côté dès que leur machine apparaît."""
+    conn = sqlite3.connect(DB_FILE)
+    rows = conn.execute(
+        "SELECT id, task_data FROM task_queue WHERE status = 'WAITING_MACHINE'"
+    ).fetchall()
+
+    ids = []
+    for task_id, raw in rows:
+        try:
+            if json.loads(raw).get("machineId") == machine_id:
+                ids.append((task_id,))
+        except Exception:
+            continue
+
+    if ids:
+        conn.executemany("UPDATE task_queue SET status = 'PENDING' WHERE id = ?", ids)
+        conn.commit()
+    conn.close()
+    return len(ids)
+
+
+def purge_orphan_deferred_tasks(valid_machine_ids, max_age_hours: int = 6) -> int:
+    """
+    Supprime les tâches en attente d'une machine que le cloud ne déclare plus.
+
+    Une machine désactivée en back-office n'est plus renvoyée par l'API, mais
+    `giveAccessToClient` continue de la citer dans ses messages Kafka — il liste
+    `gymBranch.getMachines()` sans filtrer sur le statut. Sans cette purge, ses
+    tâches s'empileraient indéfiniment.
+
+    Le délai de grâce protège une machine qui vient d'être ajoutée et que le
+    rafraîchissement n'a pas encore vue : on ne jette que ce qui est à la fois
+    ancien ET absent de la configuration.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    rows = conn.execute(
+        "SELECT id, task_data FROM task_queue "
+        "WHERE status = 'WAITING_MACHINE' AND created_at < datetime('now', ?)",
+        (f"-{max_age_hours} hours",)
+    ).fetchall()
+
+    doomed = []
+    for task_id, raw in rows:
+        try:
+            if json.loads(raw).get("machineId") not in valid_machine_ids:
+                doomed.append((task_id,))
+        except Exception:
+            doomed.append((task_id,))
+
+    if doomed:
+        conn.executemany("DELETE FROM task_queue WHERE id = ?", doomed)
+        conn.commit()
+    conn.close()
+    return len(doomed)
 
 
 def delete_completedTasks():
@@ -372,7 +696,6 @@ def process_device_queue() -> None:
     POLL_SLEEP = 0.5
     MAX_RETRIES = 3
     RETRY_SLEEP = 1
-    WAIT_HANDLE = 1
     try:
         while not stop_event_monitoring.is_set():
             row = get_next_task_from_queue()
@@ -392,30 +715,53 @@ def process_device_queue() -> None:
                 continue
 
             if ctx is None:
-                logging.warning("⚠️ Tâche #%s : machine %s non enregistrée, tâche ignorée",
+                logging.warning("⏸️ Tâche #%s : machine %s inconnue, mise en attente "
+                                "(sera rejouée dès que la machine apparaît)",
                                 task_id, task.get("machineId"))
-                mark_task_as_completed(task_id)
+                defer_task(task_id)
                 continue
 
             adapter = ctx.adapter
 
+            ok = False
+            unreachable = False
+            last_exc = None
+
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    if isinstance(adapter, PlcommAdapter):
-                        waited = 0.0
-                        while ctx.handle is None and waited < WAIT_HANDLE:
-                            time.sleep(0.5)
-                            waited += 0.5
-                        if ctx.handle is None:
-                            raise RuntimeError("Pas de handle C3 disponible")
-                    elif isinstance(adapter, ADMSAdapter):
-                        # PUSH: pas besoin de connect, l'appareil est déjà connecté
-                        if not adapter.is_connected():
-                            raise RuntimeError("Appareil PUSH non connecté")
-                    else:
-                        adapter.connect()
-
+                    # ⚠️ La préparation de la session et la commande sont dans LE
+                    # MÊME verrou. Les séparer laissait le thread temps réel
+                    # s'intercaler entre les deux et consommer, avec un GetRTLog,
+                    # le premier appel de la session fraîchement rouverte — le
+                    # seul qui aboutit sur un C3.
                     with ctx.lock:
+                        if isinstance(adapter, PlcommAdapter):
+                            # Une session C3 cesse de servir les commandes après
+                            # quelques secondes de polling temps réel : seule la
+                            # première commande qui suit un Connect aboutit, les
+                            # suivantes expirent (-2). La version de juin masquait
+                            # ce comportement en reconnectant sur chaque -2 de
+                            # GetRTLog ; en traitant -2 comme bénin, ce
+                            # rafraîchissement implicite a disparu.
+                            #
+                            # On rafraîchit donc explicitement la session avant
+                            # chaque commande. attempt_c3_reconnection déconnecte
+                            # AVANT de reconnecter : la règle du handle unique est
+                            # respectée, et le handle neuf est republié dans ctx
+                            # pour le thread temps réel comme pour l'adapter.
+                            if not attempt_c3_reconnection(ctx, max_retries=2):
+                                raise ConnectionError(
+                                    f"C3 {ctx.machine.addresseip} : session non "
+                                    f"rétablie pour la commande")
+                        elif isinstance(adapter, ADMSAdapter):
+                            # PUSH: pas besoin de connect, l'appareil est déjà connecté
+                            if not adapter.is_connected():
+                                raise RuntimeError("Appareil PUSH non connecté")
+                        # Pas de adapter.connect() ici pour les ZKEM : _ensure_conn
+                        # s'en charge, et sous zk_sdk_lock. L'appel direct entrait
+                        # dans le SDK sans verrou — exactement ce qui fait planter
+                        # le process quand le thread RT y est déjà.
+
                         if op == "ADD_USER":
                             ok = adapter.add_user(pin,
                                                   task["user_name"],
@@ -456,19 +802,60 @@ def process_device_queue() -> None:
                     else:
                         raise RuntimeError("SDK a renvoyé False")
 
+                except ConnectionError as exc:
+                    # La machine ne répond même pas au TCP (coupure secteur,
+                    # câble débranché…). Insister coûterait 3 timeouts pour
+                    # CETTE tâche, et la file étant FIFO, toutes les tâches des
+                    # autres machines attendraient derrière. On sort aussitôt.
+                    last_exc, unreachable = exc, True
+                    break
+
                 except Exception as exc:
+                    last_exc = exc
                     log_memory_usage(message=f"task_#{task_id}_fail")
                     logging.warning("⚠️ Tâche #%s échec essai %s/%s : %s",
                                     task_id, attempt, MAX_RETRIES, exc,
                                     exc_info=True)
                     time.sleep(RETRY_SLEEP)
 
+            if ok:
+                continue
+
+            if unreachable:
+                # Surtout pas COMPLETED : la tâche était jusqu'ici détruite, donc
+                # l'adhérent n'était jamais programmé sur une machine éteinte,
+                # même après son retour. Elle est rejouée dès que la machine
+                # redevient joignable (voir refresh_machines_loop).
+                logging.warning("⏸️ Tâche #%s : %s injoignable, mise en attente "
+                                "(rejouée au retour de la machine)",
+                                task_id, ctx.machine.addresseip)
+                defer_task(task_id)
             else:
-                logging.error("❌ Tâche #%s abandonnée après %s échecs",
-                              task_id, MAX_RETRIES)
+                logging.error("❌ Tâche #%s abandonnée après %s échecs : %s",
+                              task_id, MAX_RETRIES, last_exc)
                 mark_task_as_completed(task_id)
     finally:
         pythoncom.CoUninitialize()
+
+
+def run_device_queue_supervised() -> None:
+    """
+    Relance la boucle de traitement des tâches si elle meurt.
+
+    process_device_queue appelle SQLite hors de tout try — get_next_task_from_queue,
+    defer_task, mark_task_as_completed. Une base verrouillée suffisait donc à tuer
+    le thread pour de bon : plus aucune demande d'accès traitée, sans que rien ne
+    le signale (le process reste vivant, /health répondait « ok »). Le risque a
+    augmenté depuis que le rafraîchissement écrit lui aussi dans cette base.
+    """
+    while not stop_event_monitoring.is_set():
+        try:
+            pythoncom.CoInitialize()
+            process_device_queue()   # son propre finally fait le CoUninitialize
+            return                   # sortie normale = arrêt demandé
+        except Exception:
+            logging.exception("💥 File de tâches interrompue — relance dans 3s")
+            time.sleep(3)
 
 
 def process_message_pointage(message):
@@ -600,7 +987,10 @@ def consume_publish_photo():
 
 
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
-    if gym_branch_id != currentGymBranchId:
+    # Comparaison en str : l'appelant Kafka fournit un int, l'URL Flask un int,
+    # currentGymBranchId est une str. Sans cast la condition était toujours vraie
+    # et la fonction sortait systématiquement.
+    if str(gym_branch_id) != str(currentGymBranchId):
         return None
 
     ctx = get_device_context(machine_id)
@@ -665,6 +1055,15 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 document_manager_service = DocumentManagerService()
 
+JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _write_photo_atomically(dst_path: Path, data: bytes) -> None:
+    """Écrit en .part puis renomme : on ne laisse jamais un JPG tronqué derrière."""
+    tmp = dst_path.with_name(dst_path.name + ".part")
+    tmp.write_bytes(data)
+    tmp.replace(dst_path)
+
 
 @app.route('/face/upload', methods=['POST'])
 def upload_face_multipart():
@@ -681,23 +1080,32 @@ def upload_face_multipart():
     dst_name = f"verify_biophoto_9_{pin}.jpg"
     dst_path = UPLOAD_DIR / secure_filename(dst_name)
 
-    # Résolution de la photo : celle envoyée dans la requête, sinon celle déjà
-    # sur ce PC, sinon MinIO. Un poste fraîchement installé n'a aucune photo en
-    # local : on va alors la chercher via document-manager et on la garde sur
-    # disque pour les envois suivants.
+    # Résolution de la photo : celle envoyée dans la requête, sinon MinIO.
+    # On ne réutilise PLUS un fichier déjà présent sur ce PC : un JPG vide écrit
+    # une seule fois empoisonnait le poste définitivement, la branche « le
+    # fichier existe » l'emportant à tous les envois suivants.
     if file and file.filename:
-        file.save(dst_path)
-        logging.info("📥 Photo enregistrée : %s", dst_path)
-    elif dst_path.exists():
-        logging.info("📂 Photo déjà présente sur ce PC : %s", dst_path)
+        data = file.read()
+        if not data:
+            logging.error("❌ Photo vide reçue pour le PIN %s", pin)
+            return jsonify({"pin": pin, "error": "La photo reçue est vide"}), 400
+        if not data.startswith(JPEG_MAGIC):
+            logging.error("❌ Fichier non-JPEG reçu pour le PIN %s (%s octets)",
+                          pin, len(data))
+            return jsonify({"pin": pin,
+                            "error": "Le fichier reçu n'est pas un JPEG"}), 400
+        _write_photo_atomically(dst_path, data)
+        logging.info("📥 Photo enregistrée : %s (%s octets)", dst_path, len(data))
+
     elif document_manager_service.download_faceid_photo(pin, tenant, dst_path):
-        logging.info("📥 Photo enregistrée : %s", dst_path)
+        logging.info("☁️ Biophoto récupérée depuis MinIO : %s", dst_path)
+
     else:
         logging.error("❌ Aucune biophoto disponible pour le PIN %s", pin)
         return jsonify({
             "pin": pin,
-            "error": "Aucune biophoto pour ce PIN, ni sur ce PC ni dans MinIO : "
-                     "une nouvelle saisie est nécessaire"
+            "error": "Aucune biophoto pour ce PIN, ni dans la requête ni dans "
+                     "MinIO : une nouvelle saisie est nécessaire"
         }), 404
 
     report = {}
@@ -705,27 +1113,51 @@ def upload_face_multipart():
     RETRY_DELAY = 1
 
     for ctx in get_all_device_contexts():
-        if str(ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId) != str(currentGymBranchId):
+        branch = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+        if str(branch) != str(currentGymBranchId):
             continue
 
         adapter = ctx.adapter
-        ok = False
+        ok, last_error = False, None
 
         for attempt in range(1, MAX_UPLOAD_RETRIES + 1):
             try:
                 ok = adapter.upload_user_photo(pin, str(dst_path))
                 if ok:
                     break
-                else:
-                    logging.warning(f"⏱️ Tentative {attempt}/{MAX_UPLOAD_RETRIES} échouée pour {ctx.machine.addresseip}")
+                last_error = "le SDK a renvoyé False"
+                logging.warning("⏱️ Tentative %s/%s échouée pour %s",
+                                attempt, MAX_UPLOAD_RETRIES, ctx.machine.addresseip)
             except Exception as ex:
-                logging.exception(f"❌ Exception lors de l'upload vers {ctx.machine.addresseip} (essai {attempt}) : {ex}")
-
+                last_error = str(ex)
+                logging.exception("❌ Upload vers %s (essai %s) : %s",
+                                  ctx.machine.addresseip, attempt, ex)
             time.sleep(RETRY_DELAY)
 
-        report[ctx.machine.addresseip] = "OK" if ok else "KO"
+        report[ctx.machine.addresseip] = "OK" if ok else f"KO: {last_error}"
 
-    return jsonify({"pin": pin, "result": report}), 200
+    total = len(report)
+    succeeded = sum(1 for v in report.values() if v == "OK")
+
+    # On ne répond plus 200 quand tout a échoué : le front y lisait un succès et
+    # l'agent d'accueil n'avait aucun moyen de savoir que rien n'était parti.
+    if total == 0:
+        status = 503
+    elif succeeded == 0:
+        status = 500
+    elif succeeded < total:
+        status = 207
+    else:
+        status = 200
+
+    logging.info("📸 Face photo PIN %s → %s/%s machine(s) OK", pin, succeeded, total)
+
+    return jsonify({
+        "pin": pin,
+        "result": report,
+        "succeeded": succeeded,
+        "total": total,
+    }), status
 
 
 @app.route('/fingerprint/upload', methods=['POST'])
@@ -824,6 +1256,90 @@ def get_gym_branch_id():
 
 
 from flask import request, abort
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    """
+    Sonde de vivacité, consommée par Electron toutes les 10 s.
+
+    N'effectue AUCUN accès réseau — ni TCP vers les machines, ni HTTP vers le
+    cloud : une sonde qui peut bloquer ne sert à rien. Elle ne lit que des états
+    déjà en mémoire, plus un COUNT SQLite.
+
+    `watchdogStaleSeconds` est ce qui permet de détecter un process vivant mais
+    figé — le cas qui laissait les salles sans pointage sans que personne ne le
+    voie, puisque le process répondait toujours.
+    """
+    try:
+        contexts = list(get_all_device_contexts())
+        machines = []
+        for ctx in contexts:
+            adapter = ctx.adapter
+            machines.append({
+                "id": ctx.machine.id,
+                "ip": ctx.machine.addresseip,
+                "type": ctx.machine.type,
+                "rtConnected": bool(getattr(adapter, "connected", False)),
+            })
+
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=2)
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM task_queue WHERE status = 'PENDING'"
+            ).fetchone()[0]
+            conn.close()
+        except Exception:
+            pending = None
+
+        stale = None
+        if watchdog is not None:
+            stale = round(time.time() - watchdog.last_tick, 1)
+
+        # Un thread de fond mort ne tue pas le process : la file de tâches ou un
+        # consumer Kafka pouvait disparaître sans que rien ne le signale, et il
+        # fallait redémarrer l'application à la main. On l'expose pour qu'Electron
+        # relance de lui-même.
+        alive = {t.name for t in threading.enumerate()}
+        expected = ("DeviceQueueThread", "MachineWatchdog", "MachineRefresh",
+                    "PointageClientThread", "PhotoPublishThread",
+                    "FingerprintActionsThread")
+        threads = {name: (name in alive) for name in expected}
+        dead = [name for name, ok in threads.items() if not ok]
+
+        if watchdog is None:
+            # Flask répond avant que les machines ne soient chargées : on le dit,
+            # pour qu'Electron patiente au lieu de conclure à une panne.
+            status = "starting"
+        elif dead:
+            status = "degraded"
+            logging.error("🩺 /health : thread(s) critique(s) absent(s) : %s",
+                          ", ".join(dead))
+        elif stale > 120:
+            # Le watchdog tourne toutes les 10s et rafraîchit son tick même
+            # pendant son backoff : au-delà de 120s il est réellement figé.
+            status = "degraded"
+        else:
+            status = "ok"
+
+        return jsonify({
+            "status": status,
+            "threads": threads,
+            "threadsDead": dead,
+            "uptimeSeconds": round(time.time() - APP_STARTED_AT, 1),
+            "tenant": tenant,
+            "gymBranchId": currentGymBranchId,
+            "version": app_version,
+            "watchdogStaleSeconds": stale,
+            "machines": machines,
+            "machinesConnected": sum(1 for m in machines if m["rtConnected"]),
+            "machinesTotal": len(machines),
+            "queuePending": pending,
+        }), 200
+
+    except Exception as exc:
+        logging.exception("Erreur /health : %s", exc)
+        return jsonify({"status": "error", "error": str(exc)}), 500
 
 
 @app.route('/api/version', methods=['GET'])
@@ -1069,7 +1585,10 @@ def reconnect_machine(machine_id):
 
         if mtype == MachineType.STANDALONE_NEW_FIRMWARE.name or mtype == "STANDALONE_NEW_FIRMWARE":
             adapter = ctx.adapter
-            with ctx.lock:
+            # disconnect()/connect() ne passent pas par _ensure_conn : il faut
+            # prendre zk_sdk_lock explicitement. Ordre ctx.lock → zk_sdk_lock,
+            # identique partout ailleurs, donc pas d'interblocage possible.
+            with ctx.lock, zk_sdk_lock:
                 adapter.disconnect()
                 success = adapter.connect()
             if success:
@@ -1271,116 +1790,61 @@ def adms_status():
 
 @app.route('/restart', methods=['POST'])
 def soft_restart():
-    logging.info("🔄 Soft restart demandé...")
+    """
+    Recharge la configuration des machines et démarre le monitoring de celles
+    qui manquent.
 
-    def _do_soft_restart():
-        global watchdog
-        pythoncom.CoInitialize()  # ← ajout
+    Ne touche plus à stop_event_monitoring. L'ancienne version le levait puis le
+    rabaissait 3 s plus tard, avec trois conséquences : le watchdog — qui dort
+    10 s entre deux tours — ne voyait jamais le drapeau et survivait, pendant
+    qu'un second watchdog était créé (threads RT en double vers chaque
+    terminal) ; process_device_queue sortait définitivement de sa boucle, donc
+    plus aucune tâche d'accès n'était traitée après un /restart ; et le
+    monitoring mémoire s'arrêtait pour de bon.
 
-        # 1 — Arrêter les threads monitors
-        stop_event_monitoring.set()
-        time.sleep(3)
+    Un monitor mort est de toute façon relancé par le watchdog sous 10 s : il
+    n'y a rien à arrêter ici.
+    """
+    logging.info("🔄 Rechargement de la configuration demandé...")
 
-        # 2 — Remettre le stop_event à zéro
-        stop_event_monitoring.clear()
-
-        # 3 — Vider le DeviceManager
-        if app_version == "v2":
-            DeviceManagerV2.clear()
-        else:
-            DeviceManager._registry.clear()
-
-        # 4 — Recharger les machines
+    def _do_reload():
+        pythoncom.CoInitialize()
         try:
-            machines = machineService.get_access_machines(gym_branch_id, tenant)
+            machines = fetch_machines_with_retry(tenant, gym_branch_id, max_wait=30)
+            if not machines:
+                logging.error("❌ Rechargement : aucune machine récupérée")
+                return
             logging.info("🔌 Machines rechargées : %s", machines)
-        except Exception as e:
-            logging.error("❌ Erreur rechargement machines : %s", e)
-            return
 
-        if app_version == "v2":
-            # v2 restart : réenregistrer toutes les machines en PUSH
-            from services.v2.adms_server_v2 import ADMSServerV2
-            adms_srv = ADMSServerV2()
+            if app_version == "v2":
+                from services.v2.adms_server_v2 import ADMSServerV2
+                from services.v2.monitor_v2 import setup_attendance_callback
+                adms_srv = ADMSServerV2()
+                for m in machines:
+                    ctx = DeviceManagerV2.register(m, tenant, gym_branch_id)
+                    adms_srv.register_adapter(ctx.adapter)
+                setup_attendance_callback(adms_srv, tenant, gym_branch_id)
+                logging.info("✅ Rechargement v2 terminé")
+                return
+
+            added = 0
             for m in machines:
-                ctx = DeviceManagerV2.register(m, tenant, gym_branch_id)
-                adms_srv.register_adapter(ctx.adapter)
-            from services.v2.monitor_v2 import setup_attendance_callback
-            setup_attendance_callback(adms_srv, tenant, gym_branch_id)
-            logging.info("✅ Soft restart v2 terminé")
-            return
+                if DeviceManager.get(m.id) is not None:
+                    continue
+                ctx = DeviceManager.register(m, tenant, gym_branch_id)
+                register_machine_monitor(watchdog, m, ctx,
+                                         tenant, gym_branch_id, adms_server)
+                added += 1
 
-        for m in machines:
-            DeviceManager.register(m, tenant, gym_branch_id)
+            logging.info("✅ Rechargement terminé — %s machine(s) ajoutée(s). "
+                         "Les monitors morts sont relancés par le watchdog.", added)
+        except Exception as exc:
+            logging.exception("❌ Rechargement de la configuration échoué : %s", exc)
+        finally:
+            pythoncom.CoUninitialize()
 
-        # 5 — Nouveau watchdog
-        watchdog = MachineWatchdog()
-
-        for m in machines:
-            ctx = DeviceManager.register(m, tenant, gym_branch_id)
-            if m.type == "C3":
-                def make_c3(ctx=ctx):
-                    return threading.Thread(
-                        target=monitor_machine,
-                        args=(ctx, stop_event_monitoring),
-                        daemon=True,
-                        name=f"RT-C3-{ctx.machine.addresseip}"
-                    )
-                watchdog.register(m.id, make_c3)
-            else:
-                def make_zk(m=m):
-                    return threading.Thread(
-                        target=monitor_zkem,
-                        args=(m, m.addresseip, m.port, 1,
-                              stop_event_monitoring, tenant, gym_branch_id),
-                        daemon=True,
-                        name=f"RT-ZK-{m.addresseip}"
-                    )
-                watchdog.register(m.id, make_zk)
-
-        watchdog.start()
-        logging.info("✅ Soft restart terminé")
-
-    threading.Thread(target=_do_soft_restart, daemon=True, name="SoftRestart").start()
-    return jsonify({"status": "restarting"}), 200
-
-
-# ------------------------------------------------------------------ #
-# Emergency RAM saturation handler
-# ------------------------------------------------------------------ #
-def _emergency_restart():
-    """
-    Called when system RAM >= 90%. Runs GC, checks again,
-    then spawns a new process and exits.
-    """
-    import gc
-    logging.warning("RAM saturation détectée — tentative de libération mémoire...")
-    log_memory_usage(message="pre_gc")
-    freed = gc.collect()
-    logging.info("GC collecté %s objets — vérification mémoire...", freed)
-    log_memory_usage(message="post_gc")
-
-    try:
-        import psutil
-        if psutil.virtual_memory().percent < 90:
-            logging.info("RAM redescendue sous 90%% après GC — pas de redémarrage")
-            return
-    except Exception:
-        pass
-
-    logging.warning("🚨 RAM toujours saturée après GC — redémarrage de l'application...")
-    log_memory_usage(message="restart")
-    cleanup_resources()
-
-    try:
-        import subprocess
-        args = [sys.executable, __file__] + sys.argv[1:]
-        logging.info("🔄 Lancement du nouveau processus: %s", " ".join(args))
-        subprocess.Popen(args, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-    except Exception as e:
-        logging.exception("Impossible de lancer le processus de remplacement: %s", e)
-
-    os._exit(42)
+    threading.Thread(target=_do_reload, daemon=True, name="ConfigReload").start()
+    return jsonify({"status": "reloading"}), 202
 
 
 if __name__ == '__main__':
@@ -1389,17 +1853,44 @@ if __name__ == '__main__':
         cleanup_resources()
         sys.exit(0)
 
+    # setup_logging() EN PREMIER : tant qu'il n'a pas posé le handler fichier,
+    # tout ce qui est journalisé avant n'atteint jamais app.log. La ligne
+    # "Current tenant" partait ainsi dans le vide, rendant impossible de compter
+    # les redémarrages ou de vérifier l'identité du poste.
+    setup_logging()
+
+    # Environnement effectif, en clair et en premier.
+    #
+    # Un installeur construit depuis un poste configuré sur l'intégration a
+    # expédié les pointages d'un client vers le mauvais broker pendant plusieurs
+    # jours sans que rien ne le signale : Electron affichait la production (il
+    # se replie sur app.yogym.co quand YOGYM_BASE_URL manque) pendant que le
+    # pont publiait sur l'intégration. Ces deux lignes rendent l'incohérence
+    # visible au premier coup d'œil dans app.log.
+    from config import YOGYM_BASE_URL as _base_url
+    _broker = os.getenv("KAFKA_BROKER", "<absent>")
+    _env_nom = ("PRODUCTION" if "app.yogym.co" in (_base_url or "")
+                else "INTEGRATION" if "integration.yogym.co" in (_base_url or "")
+                else "INCONNU")
+    logging.info("🌐 Environnement : %s", _env_nom)
+    logging.info("🌐 YOGYM_BASE_URL=%s | KAFKA_BROKER=%s | KAFKA_TOPIC=%s",
+                 _base_url, _broker, os.getenv("KAFKA_TOPIC", "rt_pointage"))
+    if _env_nom == "INCONNU":
+        logging.warning("⚠️ YOGYM_BASE_URL ne correspond à aucun environnement connu — "
+                        "vérifier le .env livré à côté de YoGym.exe")
+
     signal.signal(signal.SIGTERM, handle_sigterm)
     start_ws_server()
     driver = None
     machineService = AccessMachineService()
 
-    if len(sys.argv) >= 3:
-        tenant = sys.argv[1]
-        gym_branch_id = sys.argv[2]
-    else:
+    if len(sys.argv) < 3:
         logging.error("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]")
         sys.exit(1)
+
+    # tenant / currentGymBranchId sont déjà résolus au chargement du module
+    # (ils conditionnent les group.id Kafka) — on ne fait que les refléter ici.
+    gym_branch_id = currentGymBranchId
 
     # Parse --version argument
     if "--version" in sys.argv:
@@ -1417,13 +1908,25 @@ if __name__ == '__main__':
         sys.exit(1)
 
     logging.info("Current tenant: %s    gymbranchid: %s    version: %s", tenant, gym_branch_id, app_version)
-    currentGymBranchId = gym_branch_id
 
     try:
-        setup_logging()
-        start_memory_monitor(interval=30, stop_event=stop_event_monitoring, on_saturation=_emergency_restart)
+        # Surveillance mémoire en observation seule. Pas de redémarrage
+        # automatique : le seuil portait sur la RAM SYSTÈME (Chrome et Electron
+        # inclus), donc sans rapport avec ce process, et la relance était de
+        # toute façon inopérante en build PyInstaller.
+        start_memory_monitor(interval=30, stop_event=stop_event_monitoring)
 
-        machines = machineService.get_access_machines(gym_branch_id, tenant)
+        # Le serveur HTTP local démarre AVANT la récupération des machines. Sur
+        # un poste dont le réseau n'est pas prêt, fetch_machines_with_retry peut
+        # patienter plusieurs minutes : pendant ce temps Electron doit pouvoir
+        # interroger /health, sinon il conclut à un pont mort et le tue en
+        # boucle sans jamais lui laisser le temps d'aboutir.
+        free_port(FLASK_PORT)
+        threading.Thread(target=lambda: app.run(
+            debug=False, host=FLASK_HOST, port=FLASK_PORT),
+                         daemon=True, name="FlaskThread").start()
+
+        machines = fetch_machines_with_retry(tenant, gym_branch_id)
         logging.info("Machines disponibles: %s", machines)
 
         if app_version == "v2":
@@ -1442,64 +1945,52 @@ if __name__ == '__main__':
             )
         else:
             # ── v1 : Legacy multi-protocole (C3 / STANDALONE / PUSH) ──
+            initialize_task_queue_db()
+
+            # Les machines DOIVENT être enregistrées avant le démarrage du thread
+            # de queue. Sinon il dépile immédiatement les tâches héritées de la
+            # session précédente alors que DeviceManager est encore vide, et les
+            # écarte comme « machine inconnue » : 10 tâches perdues en une
+            # journée, une à chaque redémarrage.
             for m in machines:
                 DeviceManager.register(m, tenant, gym_branch_id)
+                # Uniquement si la machine répond : sinon chaque tâche remise en
+                # file coûterait une sonde TCP pour être aussitôt remise de côté.
+                # Un C3 n'est jamais prêt à cet instant (son thread temps réel
+                # n'a pas encore ouvert de session) : c'est refresh_machines_loop
+                # qui rejouera ses tâches au cycle suivant.
+                if machine_ready_for_requeue(m):
+                    requeued = requeue_tasks_for_machine(m.id)
+                    if requeued:
+                        logging.info("♻️ %s tâche(s) en attente réactivée(s) "
+                                     "pour la machine %s", requeued, m.id)
 
-            initialize_task_queue_db()
-            threading.Thread(target=process_device_queue,
+            threading.Thread(target=run_device_queue_supervised,
                              daemon=True,
                              name="DeviceQueueThread").start()
 
-            global watchdog
             watchdog = MachineWatchdog()
+
             adms_server = None
-            has_push = any(m.type == "PUSH" for m in machines)
-            if has_push:
+            if any(m.type == "PUSH" for m in machines):
                 adms_server = ADMSServer(port=8088)
                 adms_server.start()
                 logging.info("🚀 Serveur ADMS démarré (port 8088)")
+
             for m in machines:
-                ctx = DeviceManager.register(m, tenant, gym_branch_id)
-
-                if m.type == "C3":
-                    def make_c3(ctx=ctx):
-                        return threading.Thread(
-                            target=monitor_machine,
-                            args=(ctx, stop_event_monitoring),
-                            daemon=True,
-                            name=f"RT-C3-{ctx.machine.addresseip}"
-                        )
-
-                    watchdog.register(m.id, make_c3)
-
-                elif m.type == "PUSH":
-                    adapter = ctx.adapter
-                    if adms_server:
-                        adms_server.register_adapter(adapter)
-
-                    def make_push(m=m, adapter=adapter):
-                        return threading.Thread(
-                            target=monitor_adms,
-                            args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
-                            daemon=True,
-                            name=f"RT-PUSH-{m.addresseip}"
-                        )
-
-                    watchdog.register(m.id, make_push)
-
-                else:  # STANDALONE_NEW_FIRMWARE
-                    def make_zk(m=m):
-                        return threading.Thread(
-                            target=monitor_zkem,
-                            args=(m, m.addresseip, m.port, 1,
-                                  stop_event_monitoring, tenant, gym_branch_id),
-                            daemon=True,
-                            name=f"RT-ZK-{m.addresseip}"
-                        )
-
-                    watchdog.register(m.id, make_zk)
+                register_machine_monitor(watchdog, m, DeviceManager.get(m.id),
+                                         tenant, gym_branch_id, adms_server)
 
             watchdog.start()
+
+            # Sans ça, une machine ajoutée en back-office reste inconnue jusqu'au
+            # prochain lancement de l'application, et ses tâches d'accès sont
+            # silencieusement perdues.
+            threading.Thread(
+                target=refresh_machines_loop,
+                args=(watchdog, tenant, gym_branch_id, adms_server),
+                daemon=True,
+                name="MachineRefresh").start()
         # ───────────────────────────────────────────────────────────────
 
         start_kafka_consumers()
@@ -1510,11 +2001,6 @@ if __name__ == '__main__':
                 for ctx in get_all_device_contexts()
             ]
         start_machine_status_broadcast(_get_all_devices_with_version, interval=5)
-
-        free_port(FLASK_PORT)
-        threading.Thread(target=lambda: app.run(
-            debug=False, host=FLASK_HOST, port=FLASK_PORT),
-                         daemon=True, name="FlaskThread").start()
 
         while True:
             time.sleep(0.01)

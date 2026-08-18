@@ -6,23 +6,53 @@ import time
 from logging.handlers import RotatingFileHandler
 
 
+# Cadence de rappel d'une saturation RAM qui dure, en secondes. Sans ce garde-fou,
+# un poste durablement à 90 % produisait un avertissement toutes les 30 s.
+_SATURATION_REMINDER = 300
+_saturation_state = {"active": False, "last_warn": 0.0}
+
+
 def log_memory_usage(logger=None, message=""):
-    """Log current process memory usage and detect RAM saturation."""
+    """
+    Journalise l'occupation mémoire, en ne parlant que lorsqu'il y a un problème.
+
+    La sonde périodique tournant toutes les 30 s, une ligne INFO systématique
+    représentait près de 3 000 lignes par jour pour une information qui n'intéresse
+    que dans deux cas : une saturation, ou une mesure demandée explicitement à
+    l'occasion d'un incident (log_memory_usage(message="task_#57_fail")).
+
+    Règle appliquée :
+      - saturation qui apparaît, ou qui dure depuis _SATURATION_REMINDER → WARNING
+      - appel explicite (message autre que "periodic")                  → INFO
+      - relevé périodique nominal                                       → DEBUG
+    """
     if logger is None:
         logger = logging.getLogger(__name__)
     try:
         import psutil
         proc = psutil.Process()
-        rss = proc.memory_info().rss
-        rss_mb = rss / 1024 / 1024
-        sys_mem = psutil.virtual_memory()
-        percent = sys_mem.percent
+        rss_mb = proc.memory_info().rss / 1024 / 1024
+        percent = psutil.virtual_memory().percent
         saturated = percent >= 90
-        warning = "⚠️ SATURATION RAM" if saturated else ""
-        logger.info(
-            "MEM %s | RSS=%.0f MB | System RAM=%s%% %s",
-            message, rss_mb, percent, warning
-        )
+
+        now = time.time()
+        if saturated:
+            first = not _saturation_state["active"]
+            due = now - _saturation_state["last_warn"] >= _SATURATION_REMINDER
+            _saturation_state["active"] = True
+            if first or due:
+                _saturation_state["last_warn"] = now
+                logger.warning("⚠️ SATURATION RAM — MEM %s | RSS=%.0f MB | "
+                               "System RAM=%s%%", message, rss_mb, percent)
+                return
+        elif _saturation_state["active"]:
+            _saturation_state["active"] = False
+            logger.info("✅ RAM revenue sous le seuil — System RAM=%s%%", percent)
+            return
+
+        level = logger.debug if message == "periodic" else logger.info
+        level("MEM %s | RSS=%.0f MB | System RAM=%s%%", message, rss_mb, percent)
+
     except ImportError:
         logger.debug("psutil not available, skipping memory log")
     except Exception:
@@ -38,7 +68,29 @@ def get_logs_dir():
     return logs_dir
 
 
-def setup_logging(level=logging.INFO, log_to_file=True, log_to_console=True):
+def setup_logging(level=None, log_to_file=True, log_to_console=True):
+    # Niveau pilotable sans rebuild, via LOG_LEVEL dans le .env (DEBUG, INFO…).
+    #
+    # Le chemin nominal est volontairement muet — renouvellements de session C3,
+    # relevés mémoire — pour que le journal ne contienne que des anomalies. Quand
+    # il faut diagnostiquer chez un client, LOG_LEVEL=DEBUG rend toute cette trace
+    # sans avoir à livrer une version spéciale.
+    if level is None:
+        wanted = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+        level = getattr(logging, wanted, None)
+        if not isinstance(level, int):
+            level = logging.INFO
+
+    # La console Windows est en cp1252 : sans ça, chaque message contenant un
+    # emoji lève un UnicodeEncodeError que logging recrache en traceback sur
+    # stderr — capturé par Electron comme une erreur du pont. Le handler fichier
+    # est déjà en UTF-8, seule la sortie console était concernée.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
+
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 

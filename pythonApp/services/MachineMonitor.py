@@ -3,6 +3,7 @@ import ctypes
 import json
 import logging
 import socket
+import threading
 import time
 from ctypes import c_char_p, c_int, c_void_p, create_string_buffer
 from datetime import datetime, timedelta
@@ -26,6 +27,64 @@ pl.Connect.restype = c_void_p
 pl.Disconnect.argtypes = [c_void_p]
 pl.GetRTLog.argtypes = [c_void_p, c_char_p, c_int]
 pl.GetRTLog.restype = c_int
+pl.GetDeviceParam.argtypes = [c_void_p, c_char_p, c_int, c_char_p]
+pl.GetDeviceParam.restype = c_int
+pl.PullLastError.restype = c_int
+
+# GetRTLog distingue deux retours qu'il ne faut surtout pas confondre :
+#
+#   0  → aucun événement en attente. Cas nominal, la session est vivante.
+#  -2  → session expirée. Mesuré sur un C3 réel : après un Connect, GetRTLog
+#        répond pendant ~3,5 s (14 appels à 200 ms) puis renvoie -2 de façon
+#        définitive. La session ne revient jamais d'elle-même et plus aucune
+#        commande n'aboutit — GetDeviceData et SetDeviceData renvoient -2 à leur
+#        tour. C'est la cause des pointages muets ET des give access en échec.
+#
+# Les deux avaient été rangés ensemble dans un « rien à lire » bénin : c'était
+# l'erreur. PullLastError vaut bien 0 sur un -2, mais cela signifie seulement que
+# le SDK ne remonte pas d'erreur applicative — pas que la session est vivante.
+SESSION_EXPIRED = -2
+
+
+def _pull_last_error():
+    """Vrai code d'erreur du Pull SDK."""
+    try:
+        return pl.PullLastError()
+    except Exception:
+        return "?"
+
+
+# Le renouvellement de session est un événement de ROUTINE : une session C3 vit
+# ~3,5 s, donc chaque panneau se reconnecte une dizaine de fois par minute. En
+# INFO, cela produisait quatre lignes toutes les cinq secondes et noyait tout le
+# reste du journal.
+#
+# Les succès passent donc en DEBUG. Pour ne pas perdre le signal pour autant, un
+# résumé est émis par panneau toutes les RENEW_SUMMARY_INTERVAL secondes : une
+# ligne au lieu de plusieurs centaines, en WARNING dès qu'un échec est survenu.
+RENEW_SUMMARY_INTERVAL = 300
+_renew_stats: dict = {}
+_renew_lock = threading.Lock()
+
+
+def _record_renewal(ip: str, ok: bool) -> None:
+    now = time.time()
+    with _renew_lock:
+        st = _renew_stats.setdefault(ip, {"ok": 0, "fail": 0, "since": now})
+        st["ok" if ok else "fail"] += 1
+        if now - st["since"] < RENEW_SUMMARY_INTERVAL:
+            return
+        elapsed = now - st["since"]
+        okc, failc = st["ok"], st["fail"]
+        _renew_stats[ip] = {"ok": 0, "fail": 0, "since": now}
+
+    minutes = max(1, round(elapsed / 60))
+    if failc:
+        logging.warning("🔄 C3 %s : %s renouvellements de session en %s min, "
+                        "dont %s en échec", ip, okc + failc, minutes, failc)
+    else:
+        logging.info("🔄 C3 %s : %s renouvellements de session en %s min, "
+                     "aucun échec", ip, okc, minutes)
 
 kafka = KafkaService(getenv("KAFKA_BROKER"), "rt_c3_group")
 KAFKA_POINTAGE_TOPIC = getenv("KAFKA_TOPIC", "rt_pointage")
@@ -33,16 +92,11 @@ KAFKA_POINTAGE_TOPIC = getenv("KAFKA_TOPIC", "rt_pointage")
 ACCESS_GRANTED = {0}
 
 
-def is_c3_handle_connected(handle: Optional[c_void_p]) -> bool:
-    if not handle:
-        return False
-    try:
-        buf = create_string_buffer(64)
-        ret = pl.GetRTLog(handle, buf, 64)
-        return ret >= 0
-    except Exception as e:
-        logging.debug(f"Connection test failed: {e}")
-        return False
+# Il n'y a plus de sonde de vivacité séparée. Toutes celles essayées ici (GetRTLog
+# puis GetDeviceParam) consommaient un appel SDK sur une session qui n'en sert
+# qu'un nombre limité avant d'expirer : la sonde précipitait donc la panne qu'elle
+# prétendait détecter. GetRTLog, appelé cinq fois par seconde par la boucle temps
+# réel, est le seul indicateur de santé nécessaire.
 
 
 def check_device_tcp(ip: str, port: str, timeout: float = 2.0) -> bool:
@@ -59,7 +113,8 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
 
     for attempt in range(max_retries):
         try:
-            logging.info(f"🔄 Reconnexion C3 {attempt + 1}/{max_retries} pour {ip}")
+            logging.debug("🔄 Reconnexion C3 %s/%s pour %s",
+                          attempt + 1, max_retries, ip)
 
             with ctx.lock:
                 if ctx.handle:
@@ -69,17 +124,17 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
                         pass
                 ctx.set_handle(None)
 
-            new_handle = connect_to_device(ip, port, com_key=getattr(ctx.machine, "comKey", None))
-            if new_handle and is_c3_handle_connected(new_handle):
+            new_handle = connect_to_device(ip, port)
+            # Pas de sonde de vérification ici : sur un C3, le premier appel qui
+            # suit un Connect est le seul qui passe à coup sûr. Le consommer pour
+            # tester la session revenait à la gâcher pour la commande qui suit.
+            # Le SDK a déjà validé la session en retournant un handle.
+            if new_handle:
                 with ctx.lock:
                     ctx.set_handle(new_handle)
-                logging.info(f"✅ C3 {ip} reconnecté avec succès")
+                logging.debug("✅ C3 %s reconnecté", ip)
+                _record_renewal(ip, ok=True)
                 return True
-            if new_handle:
-                try:
-                    pl.Disconnect(new_handle)
-                except Exception:
-                    pass
 
             time.sleep(5)
         except Exception as e:
@@ -87,6 +142,7 @@ def attempt_c3_reconnection(ctx: DeviceContext, max_retries: int = 3) -> bool:
             time.sleep(5)
 
     logging.error(f"❌ Impossible de reconnecter C3 {ip} après {max_retries} tentatives")
+    _record_renewal(ip, ok=False)
     return False
 
 
@@ -118,15 +174,10 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
     TENANT = ctx.tenant
     BRANCH_ID = str(ctx.gymBranchId)
 
-    CONNECTION_CHECK_INTERVAL = 5
-    last_check_time = datetime.now()
     consecutive_failures = 0
-    max_consecutive_failures = 2
     last_successful_read = datetime.now()
     READ_TIMEOUT = 300
 
-    EVENT_SILENT_TIMEOUT = 180
-    last_event_time = time.time()
 
     def _clean_exit(connected: bool = False, error: str = ""):
         with ctx.lock:
@@ -146,38 +197,25 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
         now = datetime.now()
         current_ts = time.time()
 
-        if current_ts - last_event_time >= EVENT_SILENT_TIMEOUT:
-            logging.error(
-                "💀 C3 %s aucun événement depuis %.0fs (timeout=%ss), "
-                "arrêt thread pour redémarrage watchdog",
-                ip, current_ts - last_event_time, EVENT_SILENT_TIMEOUT
-            )
-            _clean_exit(connected=False, error=f"Silence événements ({EVENT_SILENT_TIMEOUT}s)")
-            return
+        # Pas de suicide sur silence d'événements : une salle vide n'est pas un
+        # panneau en panne. Ce garde-fou coupait le thread toutes les 180 s dès
+        # que personne ne badgeait, et le watchdog le relançait indéfiniment.
+        # Retiré côté ZKEM auparavant, il subsistait ici.
 
-        if now - last_check_time > timedelta(seconds=CONNECTION_CHECK_INTERVAL):
-            tcp_ok = check_device_tcp(ip, port)
-
-            if tcp_ok and ctx.handle and not is_c3_handle_connected(ctx.handle):
-                consecutive_failures += 1
-                ctx.adapter.connected = False
-                logging.warning(
-                    f"⚠️ C3 {ip} connexion test failed ({consecutive_failures}/{max_consecutive_failures})"
-                )
-                if consecutive_failures >= max_consecutive_failures:
-                    logging.error(f"🚨 C3 {ip} connexion perdue, le thread va s'arrêter (watchdog relancera)")
-                    _clean_exit(connected=False, error=f"Perte de connexion après {consecutive_failures} échecs")
-                    return
-            elif not tcp_ok:
-                logging.warning(f"⚠️ C3 {ip} TCP injoignable (socket check)")
-                consecutive_failures += 1
-                if consecutive_failures >= max_consecutive_failures:
-                    logging.error(f"🚨 C3 {ip} TCP injoignable pendant {consecutive_failures} cycles, arrêt")
-                    _clean_exit(connected=False, error=f"TCP injoignable ({consecutive_failures} cycles)")
-                    return
-            else:
-                consecutive_failures = 0
-            last_check_time = now
+        # AUCUNE sonde TCP ici. Un C3 ne délivre qu'un seul handle à la fois :
+        # ouvrir une socket parallèle sur son port SDK fait tomber la session en
+        # cours. check_device_tcp a été introduit le 2026-07-06 (commit a2a39e5,
+        # « fix pointage thread ») et appelé jusqu'à cinq fois par seconde —
+        # c'est l'origine des pertes de connexion et des -2 sur les commandes.
+        # Les installations antérieures à ce commit n'ont pas le problème.
+        #
+        # La santé de la session s'évalue sur le handle existant, sans ouvrir
+        # quoi que ce soit.
+        # Plus de sonde de santé périodique ici. GetRTLog, appelé cinq fois par
+        # seconde juste en dessous, détecte lui-même la session expirée (-2) et la
+        # renouvelle : la sonde n'apprenait rien de plus. Elle était même nuisible,
+        # car chaque GetDeviceParam consommait un appel sur une session qui n'en
+        # sert qu'un petit nombre avant d'expirer.
 
         if ctx.handle and now - last_successful_read > timedelta(seconds=READ_TIMEOUT):
             logging.warning(f"⏰ C3 {ip} timeout de lecture ({READ_TIMEOUT}s), le thread va s'arrêter")
@@ -185,7 +223,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
             return
 
         if ctx.handle is None:
-            h = connect_to_device(ip, port, com_key=getattr(ctx.machine, "comKey", None))
+            h = connect_to_device(ip, port)
             if h:
                 with ctx.lock:
                     ctx.set_handle(h)
@@ -202,12 +240,23 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 time.sleep(1)
                 continue
 
-        if not check_device_tcp(ip, port):
-            time.sleep(1)
-            continue
-
+        # Pas de sonde TCP ici : cette boucle tourne ~5 fois par seconde, et
+        # check_device_tcp ouvre puis ferme une connexion à chaque appel. Sous
+        # Windows chaque socket reste ~120 s en TIME_WAIT : on maintenait donc en
+        # permanence des centaines de connexions vers le panneau (constaté sur un
+        # C3 réel). Inutile de toute façon : GetRTLog signale de lui-même la perte
+        # du lien, et le renouvellement de session sur -2, plus bas, assure la
+        # reprise.
         try:
-            ret = pl.GetRTLog(ctx.handle, buf, BUF_SZ)
+            # Le handle C3 est PARTAGÉ avec le thread de la file de tâches, qui
+            # prend déjà ctx.lock autour de ses opérations. Sans ce verrou ici,
+            # les deux threads entrent dans le SDK en même temps sur le même
+            # handle : le panneau répond alors -2 à la commande en cours
+            # (GetDeviceData pour la recherche par carte, donc tout ADD_USER).
+            # Section réduite au seul appel SDK — le traitement du pointage
+            # (Kafka, WebSocket) reste hors verrou.
+            with ctx.lock:
+                ret = pl.GetRTLog(ctx.handle, buf, BUF_SZ)
             if ret > 0:
                 last_successful_read = datetime.now()
                 consecutive_failures = 0
@@ -215,7 +264,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 if not is_event(raw):
                     continue
 
-                last_event_time = time.time()
+
                 pin, dt, state, door_id, card_no = parse_c3_line(raw)
 
                 if door_id == 1:
@@ -254,10 +303,36 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                 logging.info("📡 %s → %s", ip, payload)
 
             elif ret == 0:
+                # Aucun événement en attente : c'est le cas nominal, pas une panne.
                 last_successful_read = datetime.now()
                 time.sleep(2.0 if throttle_event.is_set() else 0.2)
+
+            elif ret == SESSION_EXPIRED:
+                # Session expirée — À RENOUVELER, surtout pas à ignorer.
+                #
+                # Mesuré sur un C3 réel : une session répond à GetRTLog pendant
+                # ~3,5 s (14 appels), puis renvoie -2 définitivement. Elle ne
+                # revient jamais d'elle-même, et plus aucune commande ne passe.
+                #
+                # La version de juin renouvelait la session sans le savoir : elle
+                # traitait tout retour négatif comme une panne, tuait le thread, et
+                # le watchdog reconnectait. En prenant -2 pour un « rien à lire »
+                # bénin, ce renouvellement a disparu — d'où les pointages muets et
+                # les give access en échec.
+                #
+                # On renouvelle donc sur place : moins brutal que de tuer le
+                # thread, et attempt_c3_reconnection déconnecte avant de
+                # reconnecter, ce qui respecte la règle du handle unique.
+                if not attempt_c3_reconnection(ctx, max_retries=2):
+                    _clean_exit(connected=False, error="session C3 non renouvelable")
+                    return
+                last_successful_read = datetime.now()
+                consecutive_failures = 0
+                time.sleep(2.0 if throttle_event.is_set() else 0.2)
+
             else:
-                logging.warning(f"GetRTLog returned error {ret} for {ip}")
+                logging.warning("GetRTLog erreur %s pour %s (PullLastError=%s)",
+                                ret, ip, _pull_last_error())
                 _clean_exit(connected=False, error=f"GetRTLog error: {ret}")
                 return
 

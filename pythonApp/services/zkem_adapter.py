@@ -18,6 +18,7 @@ import pywintypes
 import win32com.client
 
 from services.adapters import DeviceAdapter
+from services.common import zk_sdk_lock, tcp_reachable
 
 
 class ZkemAdapter(DeviceAdapter):
@@ -83,10 +84,41 @@ class ZkemAdapter(DeviceAdapter):
             logging.info("🔌 ZKEM déconnecté %s", self.ip)
 
     def _ensure_conn(fn):
+        """
+        Garantit que CET objet COM est connecté avant tout appel SDK.
+
+        On ne se fie surtout pas à self.connected : MonitorZkem le met à True
+        quand SON propre objet COM se connecte, alors que self.zk — un objet
+        distinct — n'a jamais eu Connect_Net. Le drapeau annonçait donc
+        « connecté » sur un objet qui ne l'était pas, et tout appel venant de
+        Flask (photo, porte, empreintes) échouait sans raison visible. Ça ne
+        marchait que si process_device_queue avait connecté l'adapter juste
+        avant pour une tâche Kafka — d'où ~50 % d'échecs apparemment aléatoires.
+
+        connect() rejoue Connect_Net à chaque fois, exactement comme le fait
+        déjà process_device_queue avant chaque tâche.
+
+        Le tout sous zk_sdk_lock : la connexion et l'opération doivent former un
+        bloc indivisible, sinon un autre thread peut entrer dans le SDK entre
+        les deux et faire planter le process.
+        """
         def wrapper(self, *a, **kw):
-            if not self.connected:
-                self.connect()
-            return fn(self, *a, **kw)
+            # Sonde TCP AVANT de prendre le verrou. Une machine éteinte est un
+            # cas normal en salle : sans ce filtre, Connect_Net partirait sur
+            # ses 3 tentatives (timeout SDK) en retenant zk_sdk_lock, gelant les
+            # monitors de toutes les autres machines pour une seule absente.
+            if not tcp_reachable(self.ip, self.port):
+                raise ConnectionError(
+                    f"ZKEM {self.ip}:{self.port} injoignable (TCP)"
+                )
+
+            with zk_sdk_lock:
+                if not self.connect():
+                    raise ConnectionError(
+                        f"ZKEM {self.ip}:{self.port} injoignable "
+                        f"(err={zkem_last_error(self.zk)})"
+                    )
+                return fn(self, *a, **kw)
 
         return wrapper
 
@@ -499,7 +531,9 @@ class ZkemAdapter(DeviceAdapter):
             delay = int(max(1, duration_seconds) * 10)  # doc : Delay/10 = secondes
             ok = self.zk.ACUnlock(self.mn, delay)
             if not ok:
-                from MonitorZkem import zkem_last_error  # si besoin
+                # zkem_last_error est définie plus bas dans CE module : l'import
+                # "from MonitorZkem import ..." pointait vers un module inexistant
+                # et masquait le vrai code d'erreur par un ModuleNotFoundError.
                 err = zkem_last_error(self.zk)
                 logging.error("❌ ACUnlock KO %s err=%s", self.ip, err)
                 return False
@@ -511,16 +545,33 @@ class ZkemAdapter(DeviceAdapter):
             logging.exception("❌ Exception ACUnlock sur %s : %s", self.ip, exc)
             return False
 
+_LAST_ERROR_PROBE_LOGGED = False
+
+
 def zkem_last_error(zk) -> Union[int, str]:
     """
     Lecture robuste du code d'erreur, toutes versions SDK.
     """
     try:                                    # firmware récent
         return int(zk.GetLastError())
-    except (TypeError, pywintypes.com_error):
-        err = ctypes.c_long()
-        try:                                # firmware ancien
-            zk.GetLastError(err)
-            return err.value
-        except Exception:
-            return "?"
+    except (TypeError, pywintypes.com_error) as ex_direct:
+        first = ex_direct
+
+    # Firmware ancien : GetLastError renvoie le code par paramètre de sortie,
+    # qui doit être un VARIANT BYREF (un ctypes.c_long n'est pas marshalable).
+    try:
+        err = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        zk.GetLastError(err)
+        return err.value
+    except Exception as ex_byref:
+        # Les deux formes échouent sur le SDK déployé (constaté en prod le
+        # 2026-08-14 : 24 erreurs sur 24 en "?"). On journalise la vraie cause
+        # UNE fois, pour pouvoir enfin corriger l'appel plutôt que deviner.
+        global _LAST_ERROR_PROBE_LOGGED
+        if not _LAST_ERROR_PROBE_LOGGED:
+            _LAST_ERROR_PROBE_LOGGED = True
+            logging.warning(
+                "⚠️ GetLastError inexploitable sur ce SDK — appel direct: %r | "
+                "VARIANT byref: %r", first, ex_byref
+            )
+        return "?"
