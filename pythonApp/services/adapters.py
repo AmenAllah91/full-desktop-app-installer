@@ -617,9 +617,22 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
 
         out = []
 
-        # --- Détection CSV (présence de virgules + header)
+        # --- Détection CSV vs KV
+        #
+        # L'ancien test était : virgules ET aucun "=". Or un gabarit base64
+        # se termine presque toujours par un "=" de remplissage. Une ligne CSV
+        # SANS entête (ex: "1198,12,3040,1,1,QUJDRA==,,") contenait donc un
+        # "=", était classée KV, et le parseur clé=valeur en tirait du
+        # charabia du genre {'1198,12,3040,1,1,QUJDRA': '=,,'} — sans clé Pin
+        # ni Template, donc silencieusement ignorée plus loin : zéro empreinte
+        # trouvée, sans la moindre erreur. Le repli sur l'entête connu, juste
+        # en dessous, était de ce fait inatteignable.
+        #
+        # Le vrai discriminant est le SÉPARATEUR : le format KV colle ses
+        # paires avec des tabulations, le CSV avec des virgules.
         first = lines[0]
-        looks_csv = ("," in first) and ("=" not in first)
+        looks_kv = ("=" in first) and ("\t" in first or "," not in first)
+        looks_csv = ("," in first) and not looks_kv
 
         if looks_csv:
             # header probable
