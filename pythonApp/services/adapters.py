@@ -1,6 +1,7 @@
 # services/adapters.py
 import base64
 import functools
+import re
 import threading
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -210,83 +211,174 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
             self.disconnect()
             return False
 
+    @staticmethod
+    def _pin_depuis_table(raw_data: str, card_no_clean: str):
+        """Cherche le PIN d'une carte dans un extrait de la table `user`.
+
+        Format : UID,CardNo,Pin,Password,Group,StartTime,EndTime,Name,SuperAuthorize
+
+        Partagé par la lecture filtrée et la lecture complète : les deux chemins
+        doivent appliquer EXACTEMENT la même règle de correspondance, sinon un
+        filtre qui trouve et un balayage qui ne trouve pas donneraient deux
+        résultats selon la taille du club.
+
+        Retourne (pin, nombre_de_lignes_examinees).
+        """
+        lines = raw_data.replace('\r\n', '\n').split('\n')
+        if not lines:
+            logging.error("❌ No data lines found")
+            return None, 0
+
+        headers = [h.strip() for h in lines[0].strip().split(',')]
+        try:
+            cardno_index = headers.index('CardNo')
+            pin_index = headers.index('Pin')
+        except ValueError as e:
+            logging.error(f"❌ Required fields not found in header: {e}")
+            return None, 0
+
+        for line in lines[1:]:
+            line = line.strip()
+            if not line:
+                continue
+            fields = line.split(',')
+            if len(fields) <= max(cardno_index, pin_index):
+                continue
+            card_from_data = fields[cardno_index].strip().lstrip('0')
+            pin_from_data = fields[pin_index].strip()
+            if card_from_data == card_no_clean and pin_from_data and pin_from_data != '0':
+                return pin_from_data, len(lines) - 1
+        return None, len(lines) - 1
+
+    def _lire_users(self, filtre: bytes = b""):
+        """Lit la table `user`, éventuellement filtrée côté panneau.
+
+        Lecture seule : aucune écriture, aucune suppression.
+        """
+        buffer_size = 1024 * 1024  # 1 MB buffer
+        buffer = create_string_buffer(buffer_size)
+        ret = plcommpro.GetDeviceData(
+            self.handle, buffer, buffer_size, b"user", b"*", filtre, b"")
+        if ret < 0:
+            logging.error(f"❌ GetDeviceData failed with error: {ret}")
+            return None
+        return buffer.value.decode("utf-8", errors="ignore").strip()
+
+    @staticmethod
+    def _carte_normalisee(card_no) -> str:
+        """Numéro de carte exploitable, ou '' si la fiche n'en porte pas.
+
+        ⚠️ `str(None)` vaut `'None'` : non vide et différent de `'0'`, cette
+        valeur franchissait le garde de get_pin_by_card et partait telle quelle
+        dans un filtre panneau `CardNo=None`. Constaté chez vikingsgym le
+        2026-08-20 : le C3 met 14 s à répondre -2 à ce filtre, la session ne s'en
+        relève pas, et toutes les tâches de la même rafale échouent derrière.
+        Deux ADD_USER sans carte (pin 6350, `"cardNo": null` dans le message
+        Kafka) ont ainsi bloqué 10 tâches légitimes pendant 24 h, rejouées
+        33 fois sans jamais aboutir.
+
+        Les cartes viennent de Kafka en JSON : `null` devient None, et le champ
+        peut aussi valoir `''`, `'0'` ou `'0000000000'`. Les trois désignent la
+        même chose — pas de carte — et aucun n'est filtrable côté panneau.
+        """
+        if card_no is None:
+            return ""
+        texte = str(card_no).strip()
+        # [0-9] et non \d : \d accepte les chiffres unicode, qui n'ont rien à
+        # faire dans un filtre envoyé au panneau.
+        if not re.fullmatch(r"[0-9]+", texte):
+            return ""
+        return texte.lstrip("0")
+
     def get_pin_by_card(self, card_no) -> str:
         """
         Search the user table for the given card number.
         Returns the Pin if found, else None.
-        Data format: UID,CardNo,Pin,Password,Group,StartTime,EndTime,Name,SuperAuthorize
+
+        On demande d'abord au panneau de filtrer, au lieu de rapatrier toute la
+        table pour la balayer en Python. Mesuré chez vikingsgym le 20/08/2026,
+        7379 fiches :
+
+            table complète   3,21 s   291 301 octets
+            CardNo=<n>       0,24 s       112 octets     13x plus rapide
+
+        Ce n'est pas un détail de confort : cette lecture se fait sous ctx.lock,
+        donc le thread temps réel ne lit RIEN pendant ce temps, et le coût
+        grandit avec la taille du club — c'est ce qui distingue ce client des
+        autres, qui ont dix à quarante fois moins d'adhérents.
+
+        Repli sur la lecture complète si le filtre ne rend rien : un panneau qui
+        stockerait la carte sous une autre forme (zéros de tête conservés) ne
+        doit pas devenir introuvable. Un échec coûte alors les deux lectures,
+        mais le cas est rare — 8 cartes non trouvées sur ~1900 recherches dans
+        trois jours de log.
         """
         if not self.handle:
             logging.error("❌ Device not connected")
             return None
 
-        buffer_size = 1024 * 1024  # 1 MB buffer
-        buffer = create_string_buffer(buffer_size)
-        card_no_clean = str(card_no).lstrip("0")
-        logging.info(f"🔍 Searching for card: {card_no} (cleaned: {card_no_clean})")
+        card_no_clean = self._carte_normalisee(card_no)
+        logging.info("🔍 Searching for card: %r (cleaned: %r)", card_no, card_no_clean)
+
+        # Sans carte exploitable, la recherche n'a AUCUN objet : elle ne sert
+        # qu'à retrouver l'ancien porteur de cette carte-là, et il n'y en a pas.
+        # On sortait auparavant par le bas, après une lecture complète de la
+        # table — 3,2 s sous ctx.lock chez vikingsgym, pendant lesquelles le
+        # thread temps réel ne lit aucun badge — pour comparer '' à des CardNo=0
+        # et rendre le PIN d'un adhérent sans carte pris au hasard.
+        if not card_no_clean:
+            logging.info("ℹ️ Aucune carte exploitable : recherche sans objet")
+            return None
+
         try:
-            ret = plcommpro.GetDeviceData(
-                self.handle,
-                buffer,
-                buffer_size,
-                b"user",
-                b"*",  # Get all fields
-                b"",  # No filter - get all users
-                b""
-            )
-            logging.debug(f"GetDeviceData returned: {ret}")
-            if ret < 0:
-                logging.error(f"❌ GetDeviceData failed with error: {ret}")
+            # Une carte vide ou nulle n'est PAS filtrable : chez vikingsgym,
+            # 4926 fiches sur 7379 portent CardNo=0. Le filtre les renverrait
+            # toutes — 18 secondes mesurées, soit bien pire que la lecture
+            # complète. _carte_normalisee les a déjà écartées ci-dessus.
+            if card_no_clean:
+                raw = self._lire_users(f"CardNo={card_no_clean}".encode("utf-8"))
+                if raw:
+                    pin, _ = self._pin_depuis_table(raw, card_no_clean)
+                    if pin:
+                        logging.info(f"✅ Found PIN '{pin}' for card '{card_no}'")
+                        return pin
+
+            raw_data = self._lire_users()
+            if raw_data is None:
                 return None
-            raw_data = buffer.value.decode("utf-8", errors="ignore").strip()
             if not raw_data:
                 logging.info("ℹ️ No user data found")
                 return None
-            logging.debug(f"Raw data length: {len(raw_data)} characters")
-            lines = raw_data.replace('\r\n', '\n').split('\n')
-            if not lines:
-                logging.error("❌ No data lines found")
-                return None
 
-            header_line = lines[0].strip()
-            logging.debug(f"Header: {header_line}")
-
-            headers = [h.strip() for h in header_line.split(',')]
-            logging.debug(f"Headers: {headers}")
-            try:
-                cardno_index = headers.index('CardNo')
-                pin_index = headers.index('Pin')
-                logging.debug(f"CardNo index: {cardno_index}, Pin index: {pin_index}")
-            except ValueError as e:
-                logging.error(f"❌ Required fields not found in header: {e}")
-                return None
-            for i, line in enumerate(lines[1:], 1):  # Skip header
-                line = line.strip()
-                if not line:
-                    continue
-                fields = line.split(',')
-                if len(fields) <= max(cardno_index, pin_index):
-                    logging.debug(f"Line {i}: Not enough fields ({len(fields)})")
-                    continue
-                card_from_data = fields[cardno_index].strip().lstrip('0')
-                pin_from_data = fields[pin_index].strip()
-                logging.debug(f"Line {i}: CardNo='{card_from_data}', Pin='{pin_from_data}'")
-                if card_from_data == card_no_clean and pin_from_data and pin_from_data != '0':
-                    logging.info(f"✅ Found PIN '{pin_from_data}' for card '{card_no}'")
-                    return pin_from_data
-            logging.warning(f"❌ Card '{card_no}' not found in {len(lines) - 1} users")
+            pin, examinees = self._pin_depuis_table(raw_data, card_no_clean)
+            if pin:
+                logging.info(f"✅ Found PIN '{pin}' for card '{card_no}'")
+                return pin
+            logging.warning(f"❌ Card '{card_no}' not found in {examinees} users")
             return None
         except Exception as e:
             logging.error(f"❌ Exception in get_pin_by_card: {e}")
             return None
 
     def add_user(self, pin,name, card, start, end):
+        carte = self._carte_normalisee(card)
+
         # to do set the card to 0 for old user
-        pin_old_user = self.get_pin_by_card(card)
-        if pin_old_user and pin_old_user != pin:
-            data_old_user = (f"Pin={pin_old_user}\tCardNo=0")
-            self._set(b"user", data_old_user)
-        data = (f"Pin={pin}\tCardNo={card}\tStartTime={start}"
+        # Uniquement s'il y a une carte : sans elle, aucun ancien porteur à
+        # libérer, et la recherche coûterait une lecture complète pour rien.
+        if carte:
+            pin_old_user = self.get_pin_by_card(card)
+            if pin_old_user and pin_old_user != pin:
+                data_old_user = (f"Pin={pin_old_user}\tCardNo=0")
+                self._set(b"user", data_old_user)
+
+        # `card` est écrit tel quel quand il est valide — le panneau conserve
+        # ses zéros de tête et d'autres outils lisent cette table, on ne change
+        # pas le format existant. Seule l'absence de carte est corrigée : sans
+        # ce garde, un `"cardNo": null` de Kafka partait en `CardNo=None` sur le
+        # panneau. 0 est la convention déjà en place pour « pas de carte »
+        # (4926 fiches sur 7379 chez vikingsgym).
+        data = (f"Pin={pin}\tCardNo={card if carte else 0}\tStartTime={start}"
                     f"\tEndTime={end}\tPassword=")
         return self._set(b"user", data)
 

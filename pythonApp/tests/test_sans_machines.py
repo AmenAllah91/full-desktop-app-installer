@@ -100,6 +100,353 @@ def _():
     egal(lignes[0]["Pin"], "3040", "repli sur l'entete connu")
 
 
+# ─── Recherche d'un PIN par numéro de carte ──────────────────────────────
+#
+# get_pin_by_card demande désormais au panneau de filtrer, au lieu de rapatrier
+# toute la table `user`. Mesuré chez vikingsgym le 20/08/2026 sur 7379 fiches :
+# 0,24 s et 112 octets contre 3,21 s et 291 Ko, soit 13x. Cette lecture se fait
+# sous ctx.lock — pendant tout ce temps le thread temps réel ne lit rien.
+#
+# La règle de correspondance est partagée entre la lecture filtrée et le repli
+# sur table complète : si les deux divergeaient, une même carte donnerait deux
+# résultats selon la taille du club. C'est ce que ces tests verrouillent.
+
+TABLE = ("UID,CardNo,Pin,Password,Group,StartTime,EndTime,Name,SuperAuthorize\r\n"
+         "3690,0,51308,,0,20230224,20230523,,0\r\n"
+         "1201,7809258,2287,,0,20260101,20261231,Ali,0\r\n"
+         "1202,0009281720,3040,,0,20260101,20261231,Sonia,0\r\n"
+         "1203,10460966,0,,0,20260101,20261231,Sans pin,0")
+
+
+def _regle():
+    from services.adapters import PlcommAdapter
+    return PlcommAdapter._pin_depuis_table
+
+
+@suite.test("carte presente -> son PIN")
+def _():
+    egal(_regle()(TABLE, "7809258")[0], "2287", "PIN mal retrouve")
+
+
+@suite.test("zeros de tete ignores des DEUX cotes")
+def _():
+    # Le backend envoie « 0008581861 », le panneau stocke tantot avec, tantot
+    # sans. La comparaison doit se faire sur la valeur depouillee.
+    egal(_regle()(TABLE, "9281720")[0], "3040", "les zeros du panneau doivent etre ignores")
+
+
+@suite.test("carte absente -> None, avec le nombre de fiches examinees")
+def _():
+    pin, examinees = _regle()(TABLE, "999999")
+    verifier(pin is None, "une carte absente ne doit rien rendre")
+    egal(examinees, 4, "le compte de fiches sert au message de log")
+
+
+@suite.test("fiche sans PIN exploitable (Pin=0) -> ignoree")
+def _():
+    verifier(_regle()(TABLE, "10460966")[0] is None,
+             "un Pin a 0 ne doit jamais etre rendu")
+
+
+@suite.test("en-tete illisible -> None, pas d'exception")
+def _():
+    verifier(_regle()("nimporte,quoi\r\n1,2", "7809258")[0] is None,
+             "un en-tete sans CardNo/Pin ne doit pas faire lever d'erreur")
+
+
+@suite.test("ligne tronquee -> ignoree sans casser le balayage")
+def _():
+    brut = ("UID,CardNo,Pin,Password,Group,StartTime,EndTime,Name,SuperAuthorize\r\n"
+            "9999,tronquee\r\n"
+            "1201,7809258,2287,,0,20260101,20261231,Ali,0")
+    egal(_regle()(brut, "7809258")[0], "2287",
+         "une ligne mal formee ne doit pas masquer les suivantes")
+
+
+# ─── Horloge des panneaux ────────────────────────────────────────────────
+#
+# Rien n'a jamais remis un C3 à l'heure : 171 s de retard chez vikingsgym,
+# 140 s sur le banc qui n'a subi aucune coupure. C'est l'horodatage DU PANNEAU
+# qui devient l'heure de pointage, donc tout le parc enregistre faux.
+#
+# L'encodage ZKTeco est le point sensible : un mois ou un jour mal placé
+# décalerait les pointages de plusieurs semaines. La partie SDK elle-même a été
+# vérifiée sur un C3 réel le 20/08/2026 (+140 s -> +0,8 s).
+
+def _horloge():
+    from services import MachineMonitor as mm
+    return mm
+
+
+class _FauxCtxHorloge:
+    def __init__(self, handle=None):
+        from threading import RLock
+        self.lock = RLock()
+        self.handle = handle
+        self.machine = type("M", (), {"addresseip": "192.168.1.205", "port": 4370})()
+
+
+@suite.test("encodage ZKTeco de l'heure : aller-retour exact")
+def _():
+    from datetime import datetime
+    mm = _horloge()
+    for dt in (datetime(2026, 8, 20, 16, 55, 43),
+               datetime(2026, 1, 1, 0, 0, 0),
+               datetime(2026, 12, 31, 23, 59, 59),
+               datetime(2026, 2, 28, 12, 30, 15)):
+        egal(mm._decoder_datetime(mm._encoder_datetime(dt)), dt,
+             f"l'heure doit survivre a l'aller-retour ({dt})")
+
+
+@suite.test("valeur relevee sur un C3 reel -> heure attendue")
+def _():
+    # Garde-fou contre une inversion mois/jour : cet entier a ete lu sur le
+    # panneau du banc, l'heure correspondante est connue.
+    from datetime import datetime
+    egal(_horloge()._decoder_datetime(856094223),
+         datetime(2026, 8, 20, 11, 57, 3), "decodage d'une valeur reelle")
+
+
+@suite.test("sans session ouverte -> None, aucune exception")
+def _():
+    verifier(_horloge().synchroniser_horloge(_FauxCtxHorloge(handle=None)) is None,
+             "un panneau sans session ne doit pas faire lever d'erreur")
+
+
+@suite.test("cadence : controle au 1er passage, puis plus avant 12 h")
+def _():
+    import time
+    mm = _horloge()
+    vrai = mm.synchroniser_horloge
+    appels = []
+    mm.synchroniser_horloge = lambda ctx: appels.append(1) or 3.0
+    mm._horloge_prochain.clear()
+    try:
+        ctx = _FauxCtxHorloge(handle=1)
+        egal(mm.synchroniser_horloge_si_besoin(ctx), 3.0, "1er passage : controle")
+        verifier(mm.synchroniser_horloge_si_besoin(ctx) is None, "2e passage : ignore")
+        egal(len(appels), 1, "un seul controle effectif attendu")
+        restant = mm._horloge_prochain[ctx.machine.addresseip] - time.time()
+        verifier(11.9 * 3600 < restant <= 12 * 3600,
+                 f"prochain controle dans ~12 h (obtenu {restant / 3600:.1f} h)")
+    finally:
+        mm.synchroniser_horloge = vrai
+        mm._horloge_prochain.clear()
+
+
+@suite.test("horloge illisible -> nouvelle tentative dans 1 h, pas dans 12")
+def _():
+    import time
+    mm = _horloge()
+    vrai = mm.synchroniser_horloge
+    mm.synchroniser_horloge = lambda ctx: None
+    mm._horloge_prochain.clear()
+    try:
+        ctx = _FauxCtxHorloge(handle=1)
+        verifier(mm.synchroniser_horloge_si_besoin(ctx) is None, "lecture ratee -> None")
+        restant = mm._horloge_prochain[ctx.machine.addresseip] - time.time()
+        verifier(0.9 * 3600 < restant <= 3600,
+                 f"un panneau illisible doit etre retente dans ~1 h (obtenu {restant / 3600:.1f} h)")
+    finally:
+        mm.synchroniser_horloge = vrai
+        mm._horloge_prochain.clear()
+
+
+# ─── Découpage du tampon temps réel (evenements_du_tampon) ───────────────
+#
+# GetRTLog colle plusieurs trames dans un même tampon quand deux badgeages
+# tombent entre deux lectures. Le tampon était parsé comme une trame unique :
+# le thread temps réel mourait sur un ValueError et le watchdog le relançait
+# 10 s plus tard, deux pointages perdus. Vu chez vikingsgym le 19/08/2026.
+
+def _tampon():
+    from services.MachineMonitor import evenements_du_tampon
+    return evenements_du_tampon
+
+
+# Trame réelle relevée en production, telle que le SDK l'a rendue.
+TAMPON_REEL = ("2026-08-19 19:35:26,4148,8612806,2,29,1,6\r\n"
+               "2026-08-19 19:35:29,4148,8612806,1,29,0,6")
+
+
+@suite.test("deux evenements colles -> les DEUX sont lus (regression 19/08)")
+def _():
+    ev = _tampon()(TAMPON_REEL)
+    egal(len(ev), 2, "les deux pointages doivent survivre")
+    egal(ev[0][0], 4148, "pin du 1er evenement")
+    egal(ev[1][0], 4148, "pin du 2e evenement")
+    egal(ev[0][3], 2, "door_id du 1er evenement")
+    egal(ev[1][3], 1, "door_id du 2e evenement")
+    egal(ev[0][1].strftime("%H:%M:%S"), "19:35:26", "horodatage du 1er")
+    egal(ev[1][1].strftime("%H:%M:%S"), "19:35:29", "horodatage du 2e")
+
+
+@suite.test("un tampon colle ne leve plus d'exception")
+def _():
+    # Le coeur de la regression : c'est l'exception, pas la perte d'un
+    # pointage, qui tuait le thread.
+    try:
+        _tampon()(TAMPON_REEL)
+    except Exception as e:
+        raise AssertionError(f"aucune exception ne doit sortir : {type(e).__name__}: {e}")
+
+
+@suite.test("evenement unique -> toujours lu")
+def _():
+    ev = _tampon()("2026-08-19 19:35:26,4148,8612806,2,29,1,6")
+    egal(len(ev), 1, "un evenement seul doit rester lu")
+    egal(ev[0][0], 4148, "pin mal extrait")
+
+
+@suite.test("trame illisible -> seule celle-la est perdue")
+def _():
+    brut = ("2026-08-19 19:35:26,4148,8612806,2,29,1,6\r\n"
+            "PAS-UNE-DATE,4148,8612806,1,29,0,6\r\n"
+            "2026-08-19 19:35:31,4149,8612807,1,29,0,6")
+    ev = _tampon()(brut)
+    egal(len(ev), 2, "les trames valides doivent survivre a leur voisine cassee")
+    egal([e[0] for e in ev], [4148, 4149], "mauvais evenements conserves")
+
+
+@suite.test("tampon vide ou blanc -> liste vide, pas d'exception")
+def _():
+    egal(_tampon()(""), [], "chaine vide")
+    egal(_tampon()(None), [], "None")
+    egal(_tampon()("\r\n\r\n"), [], "lignes vides")
+
+
+@suite.test("statut de porte (event_type 255) -> ignore, pas d'erreur")
+def _():
+    brut = ("2026-08-19 19:35:26,0,0,1,255,0,0\r\n"
+            "2026-08-19 19:35:29,4148,8612806,1,29,0,6")
+    ev = _tampon()(brut)
+    egal(len(ev), 1, "seul le vrai pointage doit ressortir")
+    egal(ev[0][0], 4148, "le pointage doit etre celui de l'adherent")
+
+
+# ─── Événements du panneau sans porteur (Pin=0) ──────────────────────────
+#
+# is_access_valid vaut event_type == 0 : tout autre code ressort en « ENTREE
+# refusée » sur l'écran du client. Le filtre ne rejetait Pin=0 que lorsque
+# event_type valait 0 lui aussi, donc les événements propres au panneau —
+# porte, bouton, alarme — s'affichaient comme des refus, sans nom ni photo.
+# Relevé chez vikingsgym du 18 au 21/08/2026 : 43 lignes fantômes sur 612,
+# soit 57 % de tous les refus affichés.
+
+@suite.test("Pin=0 sans carte -> ecarte, quel que soit l'event_type")
+def _():
+    from services.MachineMonitor import is_event
+    for code in (0, 5, 20, 23, 27):
+        verifier(not is_event("2026-08-21 14:22:01,0,0,1,%d,1,6" % code),
+                 "event_type %d avec Pin=0 et CardNo=0 doit etre ecarte" % code)
+    verifier(not is_event("2026-08-21 14:22:01,0,,1,5,1,6"),
+             "champ carte vide : meme traitement que CardNo=0")
+
+
+@suite.test("Pin=0 AVEC une carte -> conserve (carte inconnue presentee)")
+def _():
+    # Information utile : quelqu'un a presente une carte que le panneau ne
+    # connait pas. Chez vikingsgym, les 3 occurrences portaient les cartes
+    # d'adherents dont l'ADD_USER etait reste bloque dans la file.
+    from services.MachineMonitor import is_event
+    verifier(is_event("2026-08-20 08:19:03,0,9334952,1,27,1,6"),
+             "une carte inconnue presentee doit rester visible")
+
+
+@suite.test("un adherent reel n'est jamais ecarte, meme sans carte")
+def _():
+    # Les employes de vikingsgym entrent par empreinte : Pin renseigne,
+    # CardNo=0. Ces 42 passages releves en production doivent survivre au
+    # filtre — c'est precisement ce que la condition ne doit pas attraper.
+    from services.MachineMonitor import is_event
+    verifier(is_event("2026-08-21 10:00:00,40004,0,1,0,1,6"),
+             "entree par empreinte d'un employe (Pin renseigne, sans carte)")
+    verifier(is_event("2026-08-21 14:38:51,3058,14736594,1,11,1,6"),
+             "event_type 11 sur un adherent reel")
+
+
+# ─── Réutilisation de session C3 (ensure_c3_session) ─────────────────────
+#
+# Le pont reconnectait avant CHAQUE commande, sur la croyance qu'une session
+# C3 ne sert qu'un appel. L'expérience du 20/08/2026 l'a infirmée (613 appels
+# sans échec). Ces tests verrouillent le nouveau comportement : emprunter la
+# session en cours, et ne la renouveler qu'après un échec avéré.
+
+class _FauxCtx:
+    """Contexte minimal : ce que ensure_c3_session touche réellement."""
+
+    def __init__(self, handle=None):
+        from threading import RLock
+        self.lock = RLock()
+        self.handle = handle
+        self.machine = type("M", (), {"addresseip": "192.168.1.205", "port": 4370})()
+        self.poses = []
+
+    def set_handle(self, h):
+        self.handle = h
+        self.poses.append(h)
+
+
+def _ensure(faux, force=False, connexion=None):
+    """Appelle ensure_c3_session en neutralisant le SDK et le journal."""
+    from services import MachineMonitor as mm
+    vrai_connect, vrai_journal = mm.connect_to_device, mm._record_renewal
+    appels = {"connect": 0}
+
+    def connect_espion(ip, port):
+        appels["connect"] += 1
+        return connexion
+
+    mm.connect_to_device = connect_espion
+    mm._record_renewal = lambda ip, ok: None
+    try:
+        return mm.ensure_c3_session(faux, force_reconnect=force), appels
+    finally:
+        mm.connect_to_device = vrai_connect
+        mm._record_renewal = vrai_journal
+
+
+@suite.test("session existante -> reutilisee, AUCUNE reconnexion")
+def _():
+    faux = _FauxCtx(handle=1234)
+    ok, appels = _ensure(faux)
+    verifier(ok, "une session vivante doit etre acceptee")
+    egal(appels["connect"], 0, "le SDK ne doit pas etre rappele")
+    egal(faux.handle, 1234, "le handle en cours ne doit pas changer")
+    egal(faux.poses, [], "aucun nouveau handle ne doit etre publie")
+
+
+@suite.test("aucune session -> une seule connexion, handle publie")
+def _():
+    faux = _FauxCtx(handle=None)
+    ok, appels = _ensure(faux, connexion=777)
+    verifier(ok, "une connexion reussie doit rendre True")
+    egal(appels["connect"], 1, "une seule connexion attendue")
+    egal(faux.handle, 777, "le nouveau handle doit etre publie dans le contexte")
+
+
+@suite.test("connexion impossible -> False, sans handle fantome")
+def _():
+    faux = _FauxCtx(handle=None)
+    ok, _ = _ensure(faux, connexion=None)
+    verifier(not ok, "un echec de connexion doit rendre False")
+    egal(faux.handle, None, "aucun handle ne doit etre pose en cas d'echec")
+
+
+@suite.test("force_reconnect -> renouvellement reel, session en cours ignoree")
+def _():
+    from services import MachineMonitor as mm
+    faux = _FauxCtx(handle=1234)
+    vrai = mm.attempt_c3_reconnection
+    vus = []
+    mm.attempt_c3_reconnection = lambda ctx, max_retries=3: vus.append(max_retries) or True
+    try:
+        verifier(mm.ensure_c3_session(faux, force_reconnect=True), "doit rendre True")
+    finally:
+        mm.attempt_c3_reconnection = vrai
+    egal(vus, [2], "le renouvellement doit passer par attempt_c3_reconnection")
+
+
 # ─── Encodage des gabarits ───────────────────────────────────────────────
 
 @suite.test("aller-retour base64 d'un gabarit binaire")

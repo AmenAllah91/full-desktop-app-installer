@@ -14,6 +14,25 @@ Logique pure, aucun réseau, aucune pointeuse, pythonApp arrêté :
 - filtre de branche des actions d'empreinte (`gymBranchId`)
 - parsing `templatev10` du PullSDK (CSV avec/sans en-tête, clé=valeur)
 - encodage base64 des gabarits
+- découpage du tampon temps réel (`evenements_du_tampon`) — plusieurs trames
+  collées dans un même `GetRTLog`, régression du 19/08/2026
+- réutilisation de session C3 (`ensure_c3_session`) — emprunter la session en
+  cours, ne renouveler qu'après un échec
+- horloge des panneaux (`synchroniser_horloge`) — encodage ZKTeco et cadence de
+  contrôle ; la partie SDK a été vérifiée sur un C3 réel (+140 s → +0,8 s)
+
+## 1 bis. File de tâches — temporisation du rejeu
+
+```
+venv\Scripts\python.exe tests\test_file_backoff.py
+```
+
+Suite séparée : elle charge les fonctions de file de `main.py` par l'AST, faute
+de pouvoir l'importer (Kafka, identité, écritures dans APPDATA au niveau
+module). Elle protège surtout la **migration de schéma** — les colonnes
+`attempts` et `next_attempt_at` sont ajoutées à des bases SQLite déjà en
+service chez les clients, c'est le risque de déploiement le plus sérieux du
+lot.
 
 ## 2. Avec machines — conditions requises
 

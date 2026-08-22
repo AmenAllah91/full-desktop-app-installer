@@ -38,7 +38,7 @@ def signaler(machine, pin, quand):
 def ecouter_c3():
     from ctypes import c_void_p, c_char_p, c_int, create_string_buffer
     from services.addAndAuthorizeUser import connect_to_device, plcommpro as pl
-    from services.MachineMonitor import is_event, parse_c3_line
+    from services.MachineMonitor import evenements_du_tampon
 
     pl.GetRTLog.argtypes = [c_void_p, c_char_p, c_int]
     pl.GetRTLog.restype = c_int
@@ -55,13 +55,13 @@ def ecouter_c3():
         ret = pl.GetRTLog(h, buf, 64 * 1024)
         if ret > 0:
             brut = buf.value.decode(errors="replace").strip()
-            # Les enregistrements 255 sont des statuts porte/alarme, pas des pointages
-            if is_event(brut):
-                try:
-                    pin, dt, state, door, card = parse_c3_line(brut)
-                    signaler("C3 192.168.1.205", pin, dt.strftime("%H:%M:%S"))
-                except Exception:
-                    pass
+            # evenements_du_tampon ecarte les statuts porte/alarme (255) ET
+            # decoupe le tampon : GetRTLog colle plusieurs trames quand deux
+            # badgeages se suivent de pres. Le try/except qui entourait
+            # parse_c3_line ici les perdait tous les deux en silence — soit
+            # exactement le cas qu'on veut observer avec cet outil.
+            for pin, dt, state, door, card in evenements_du_tampon(brut, C3_IP):
+                signaler("C3 192.168.1.205", pin, dt.strftime("%H:%M:%S"))
         elif ret == -2:
             renouv += 1
             try:

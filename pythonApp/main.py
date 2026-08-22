@@ -22,7 +22,9 @@ from services.common import zk_sdk_lock, tcp_reachable
 from services.captureFingerPrint import FingerprintCapture
 from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
-from services.MachineMonitor import monitor_machine, make_rt_json, kafka, attempt_c3_reconnection
+from services.MachineMonitor import (monitor_machine, make_rt_json, kafka,
+                                     attempt_c3_reconnection, ensure_c3_session,
+                                     synchroniser_horloge_si_besoin)
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -491,10 +493,36 @@ def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str
                                      "de nouveau joignable",
                                      requeued, m.id, m.addresseip)
 
+                    # Rien n'a jamais remis un C3 à l'heure : les panneaux
+                    # dérivent depuis leur installation et c'est LEUR horodatage
+                    # qui devient l'heure de pointage. Le contrôle a lieu ici
+                    # parce que la condition ci-dessus garantit déjà qu'un C3 a
+                    # une session ouverte — sans quoi rien n'est lisible.
+                    # Le rythme (premier passage puis toutes les 12 h) et le
+                    # seuil de correction sont gérés par la fonction appelée.
+                    ctx_horloge = DeviceManager.get(m.id)
+                    if ctx_horloge is not None and isinstance(ctx_horloge.adapter,
+                                                              PlcommAdapter):
+                        try:
+                            synchroniser_horloge_si_besoin(ctx_horloge)
+                        except Exception as exc:
+                            # Une horloge non recalée ne doit jamais empêcher le
+                            # rafraîchissement des machines de se terminer.
+                            logging.warning("⚠️ Horloge %s : contrôle impossible (%s)",
+                                            m.addresseip, exc)
+
             purged = purge_orphan_deferred_tasks(seen)
             if purged:
                 logging.warning("🗑️ %s tâche(s) supprimée(s) : leur machine n'est "
                                 "plus déclarée par le cloud (désactivée)", purged)
+
+            # Plafond de la branche « injoignable », qui n'en avait aucun.
+            # Contrôlé ici parce que cette boucle passe déjà toutes les 5 min.
+            expirees = abandonner_taches_expirees()
+            if expirees:
+                logging.warning("🛑 %s tâche(s) abandonnée(s) après %s h : voir les "
+                                "lignes ci-dessus pour savoir qui rejouer",
+                                expirees, TACHE_DUREE_MAX_H)
 
             for ctx in list(DeviceManager.all()):
                 if ctx.machine.id not in seen:
@@ -511,6 +539,45 @@ def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str
 # (reste du code inchangé)
 # ------------------------------------------------------------------ #
 
+# Paliers de temporisation entre deux rejeux d'une même tâche, en secondes.
+# Le dernier est le plafond.
+#
+# Sans temporisation, refresh_machines_loop remettait TOUTES les tâches en
+# attente d'une machine en PENDING à chaque cycle de 5 min, sans condition. Sur
+# un panneau qui répond au TCP mais rate ses commandes — le cas de vikingsgym —
+# elles échouaient toutes et repartaient toutes : 1623 rejeux pour 217 tâches
+# en trois jours, une seule d'entre elles rejouée 44 fois.
+#
+# Le plafond est volontairement bas (15 min) : une tâche trop temporisée ferait
+# attendre à la porte un adhérent dont la machine est revenue. Et dès qu'une
+# tâche aboutit sur une machine, reset_backoff_for_machine efface l'attente des
+# autres — un succès prouve que le panneau répond, il n'y a plus à patienter.
+BACKOFF_PALIERS = (60, 120, 300, 600, 900)
+
+
+def _delai_backoff(tentatives: int) -> int:
+    """Délai avant le prochain rejeu, d'après le nombre d'échecs déjà essuyés."""
+    rang = min(max(tentatives, 1), len(BACKOFF_PALIERS)) - 1
+    return BACKOFF_PALIERS[rang]
+
+
+def _migrer_task_queue(conn) -> None:
+    """Ajoute les colonnes de temporisation à une base déjà en service.
+
+    CREATE TABLE IF NOT EXISTS ne fait rien sur une table existante : sans cette
+    migration, un poste déjà installé garderait l'ancien schéma et planterait au
+    premier defer_task. Elle est idempotente et sans valeur à recalculer — les
+    tâches déjà en attente ont next_attempt_at NULL, donc sont rejouées
+    immédiatement, exactement comme avant la mise à jour.
+    """
+    colonnes = {r[1] for r in conn.execute("PRAGMA table_info(task_queue)")}
+    if "attempts" not in colonnes:
+        conn.execute("ALTER TABLE task_queue "
+                     "ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+    if "next_attempt_at" not in colonnes:
+        conn.execute("ALTER TABLE task_queue ADD COLUMN next_attempt_at TIMESTAMP")
+
+
 def initialize_task_queue_db():
     """Initialize the SQLite database for task queue."""
     conn = sqlite3.connect(DB_FILE)
@@ -520,9 +587,12 @@ def initialize_task_queue_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             task_data TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'PENDING',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TIMESTAMP
         )
     """)
+    _migrer_task_queue(conn)
     conn.commit()
     conn.close()
 
@@ -566,19 +636,38 @@ def defer_task(task_id):
     continue de désigner dans ses messages Kafka. On ne peut pas la laisser en
     PENDING — la file est FIFO, elle bloquerait tout ce qui suit — d'où ce
     statut distinct.
+
+    Chaque mise de côté espace un peu plus le rejeu suivant (BACKOFF_PALIERS).
+    Retourne (tentatives, délai_en_secondes) pour que l'appelant le journalise.
     """
     conn = sqlite3.connect(DB_FILE)
-    conn.execute("UPDATE task_queue SET status = 'WAITING_MACHINE' WHERE id = ?",
-                 (task_id,))
+    row = conn.execute("SELECT attempts FROM task_queue WHERE id = ?",
+                       (task_id,)).fetchone()
+    tentatives = ((row[0] if row and row[0] is not None else 0) + 1)
+    delai = _delai_backoff(tentatives)
+
+    # datetime('now') est en UTC, comme created_at et comme la comparaison de
+    # purge_orphan_deferred_tasks : tout reste sur l'horloge de SQLite, jamais
+    # sur celle de Python, sinon les deux dérivent selon le fuseau du poste.
+    conn.execute(
+        "UPDATE task_queue SET status = 'WAITING_MACHINE', attempts = ?, "
+        "next_attempt_at = datetime('now', ?) WHERE id = ?",
+        (tentatives, f"+{delai} seconds", task_id))
     conn.commit()
     conn.close()
+    return tentatives, delai
 
 
 def requeue_tasks_for_machine(machine_id) -> int:
-    """Réactive les tâches mises de côté dès que leur machine apparaît."""
+    """Réactive les tâches mises de côté dont la temporisation est écoulée.
+
+    next_attempt_at NULL = tâche antérieure à la migration : rejouée tout de
+    suite, comme avant.
+    """
     conn = sqlite3.connect(DB_FILE)
     rows = conn.execute(
-        "SELECT id, task_data FROM task_queue WHERE status = 'WAITING_MACHINE'"
+        "SELECT id, task_data FROM task_queue WHERE status = 'WAITING_MACHINE' "
+        "AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))"
     ).fetchall()
 
     ids = []
@@ -591,6 +680,44 @@ def requeue_tasks_for_machine(machine_id) -> int:
 
     if ids:
         conn.executemany("UPDATE task_queue SET status = 'PENDING' WHERE id = ?", ids)
+        conn.commit()
+    conn.close()
+    return len(ids)
+
+
+def reset_backoff_for_machine(machine_id) -> int:
+    """Efface la temporisation des tâches d'une machine qui vient de répondre.
+
+    Appelée après chaque tâche réussie. Un succès est la preuve que le panneau
+    traite les commandes : faire patienter les tâches suivantes jusqu'à 15 min
+    laisserait un adhérent devant une porte qui fonctionne.
+
+    ⚠️ On efface l'échéance mais PAS le compteur de tentatives. Sur un panneau
+    dégradé qui n'honore qu'une commande sur cinq — le cas de vikingsgym — un
+    succès survient toutes les quelques minutes ; remettre le compteur à zéro à
+    chaque fois empêcherait la temporisation de jamais dépasser son premier
+    palier, et le backoff n'aurait aucun effet là où il sert justement. En
+    gardant le compteur, une tâche libérée qui échoue de nouveau repart au
+    palier SUIVANT. Sur une machine réellement revenue la question ne se pose
+    pas : les tâches aboutissent et le compteur n'est plus jamais consulté.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    rows = conn.execute(
+        "SELECT id, task_data FROM task_queue WHERE status = 'WAITING_MACHINE' "
+        "AND next_attempt_at IS NOT NULL"
+    ).fetchall()
+
+    ids = []
+    for task_id, raw in rows:
+        try:
+            if json.loads(raw).get("machineId") == machine_id:
+                ids.append((task_id,))
+        except Exception:
+            continue
+
+    if ids:
+        conn.executemany(
+            "UPDATE task_queue SET next_attempt_at = NULL WHERE id = ?", ids)
         conn.commit()
     conn.close()
     return len(ids)
@@ -629,6 +756,57 @@ def purge_orphan_deferred_tasks(valid_machine_ids, max_age_hours: int = 6) -> in
         conn.commit()
     conn.close()
     return len(doomed)
+
+
+TACHE_DUREE_MAX_H = 24
+
+
+def abandonner_taches_expirees(max_age_hours: int = TACHE_DUREE_MAX_H) -> int:
+    """Abandonne les tâches en attente depuis plus de `max_age_hours`.
+
+    La branche « machine injoignable » de process_device_queue n'avait AUCUN
+    plafond : une tâche qui ne peut pas aboutir y était rejouée indéfiniment,
+    toutes les 15 min, nuit comprise. Constaté chez vikingsgym le 2026-08-21 :
+    12 tâches à 33 essais, encore actives après 24 h, et **0 tâche abandonnée
+    en quatre jours de journal** — la soupape de MAX_RETRIES est sur l'autre
+    branche et ne s'était jamais déclenchée.
+
+    purge_orphan_deferred_tasks ne couvre pas ce cas : elle ne supprime que les
+    tâches visant une machine que le cloud ne déclare plus. Chez vikingsgym la
+    machine était bien déclarée ET joignable — c'est la tâche elle-même qui
+    échouait, donc rien ne la purgeait.
+
+    Délai retenu avec l'utilisateur le 2026-08-21 : **une journée**, après quoi
+    l'accueil rejoue l'opération à la main si besoin. D'où la journalisation de
+    l'adhérent concerné : sans son pin et son nom, personne ne peut savoir qui
+    rejouer.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    rows = conn.execute(
+        "SELECT id, task_data FROM task_queue "
+        "WHERE status = 'WAITING_MACHINE' AND created_at < datetime('now', ?)",
+        (f"-{max_age_hours} hours",)
+    ).fetchall()
+    if not rows:
+        conn.close()
+        return 0
+
+    for task_id, raw in rows:
+        try:
+            t = json.loads(raw)
+            qui = "pin %s (%s)" % (t.get("user_pin"), t.get("user_name") or "sans nom")
+            quoi = "%s sur %s" % (t.get("operation"), t.get("ip_address"))
+        except Exception:
+            qui, quoi = "tâche illisible", "?"
+        logging.error("🛑 Tâche #%s ABANDONNÉE après %s h d'échecs — %s, %s. "
+                      "À rejouer manuellement depuis le back-office si nécessaire.",
+                      task_id, max_age_hours, quoi, qui)
+
+    conn.executemany("UPDATE task_queue SET status = 'COMPLETED' WHERE id = ?",
+                     [(r[0],) for r in rows])
+    conn.commit()
+    conn.close()
+    return len(rows)
 
 
 def delete_completedTasks():
@@ -729,27 +907,26 @@ def process_device_queue() -> None:
 
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    # ⚠️ La préparation de la session et la commande sont dans LE
-                    # MÊME verrou. Les séparer laissait le thread temps réel
-                    # s'intercaler entre les deux et consommer, avec un GetRTLog,
-                    # le premier appel de la session fraîchement rouverte — le
-                    # seul qui aboutit sur un C3.
+                    # ⚠️ La préparation de la session et la commande restent dans
+                    # LE MÊME verrou. La raison n'est plus de protéger « le seul
+                    # appel qui aboutit » — cette croyance est infirmée (voir
+                    # ensure_c3_session) — mais la règle du handle unique : deux
+                    # threads qui entrent dans le SDK en même temps sur le même
+                    # handle font répondre -2 à la commande en cours.
                     with ctx.lock:
                         if isinstance(adapter, PlcommAdapter):
-                            # Une session C3 cesse de servir les commandes après
-                            # quelques secondes de polling temps réel : seule la
-                            # première commande qui suit un Connect aboutit, les
-                            # suivantes expirent (-2). La version de juin masquait
-                            # ce comportement en reconnectant sur chaque -2 de
-                            # GetRTLog ; en traitant -2 comme bénin, ce
-                            # rafraîchissement implicite a disparu.
+                            # On EMPRUNTE la session en cours au lieu de la
+                            # détruire pour en rouvrir une. Une session C3 sert
+                            # indéfiniment les commandes, même pendant que le
+                            # thread temps réel l'interroge : vérifié sur un
+                            # panneau sain, 613 appels sans un échec (voir
+                            # ensure_c3_session).
                             #
-                            # On rafraîchit donc explicitement la session avant
-                            # chaque commande. attempt_c3_reconnection déconnecte
-                            # AVANT de reconnecter : la règle du handle unique est
-                            # respectée, et le handle neuf est republié dans ctx
-                            # pour le thread temps réel comme pour l'adapter.
-                            if not attempt_c3_reconnection(ctx, max_retries=2):
+                            # Ce n'est qu'après un échec — donc à partir du 2e
+                            # essai — qu'on soupçonne la session et qu'on la
+                            # renouvelle vraiment.
+                            if not ensure_c3_session(ctx,
+                                                     force_reconnect=attempt > 1):
                                 raise ConnectionError(
                                     f"C3 {ctx.machine.addresseip} : session non "
                                     f"rétablie pour la commande")
@@ -798,17 +975,50 @@ def process_device_queue() -> None:
                         logging.info("✅ Tâche #%s terminée (%s / %s)",
                                      task_id, ctx.machine.alias, op)
                         mark_task_as_completed(task_id)
+                        # La machine répond : plus de raison de faire patienter
+                        # ses autres tâches. Sans ça, une file constituée pendant
+                        # une panne se viderait au rythme du plafond de 15 min
+                        # alors que le panneau est déjà revenu.
+                        liberees = reset_backoff_for_machine(task.get("machineId"))
+                        if liberees:
+                            logging.info("♻️ %s tâche(s) en attente liberee(s) : "
+                                         "la machine %s repond de nouveau",
+                                         liberees, task.get("machineId"))
                         break
                     else:
                         raise RuntimeError("SDK a renvoyé False")
 
                 except ConnectionError as exc:
-                    # La machine ne répond même pas au TCP (coupure secteur,
-                    # câble débranché…). Insister coûterait 3 timeouts pour
-                    # CETTE tâche, et la file étant FIFO, toutes les tâches des
-                    # autres machines attendraient derrière. On sort aussitôt.
-                    last_exc, unreachable = exc, True
-                    break
+                    # ⚠️ Toutes les ConnectionError ne disent PAS « machine
+                    # éteinte ». _set en lève une sur un retour -2 du panneau
+                    # (adapters.SDK_TIMEOUT), qui signifie le plus souvent
+                    # « session SDK morte », pas « câble débranché ».
+                    #
+                    # Sortir dès le 1er essai rendait le rattrapage prévu
+                    # inatteignable : c'est l'essai SUIVANT qui rappelle
+                    # ensure_c3_session avec force_reconnect=True. Ce chemin n'a
+                    # donc jamais tourné. Chez vikingsgym, 12 tâches ont été
+                    # rejouées 33 fois en 24 h sans jamais aboutir, sur un panneau
+                    # qui renouvelait sa session 60 fois par 5 min sans un échec —
+                    # et 0 tâche abandonnée en 4 jours, la branche `unreachable`
+                    # n'ayant pas de plafond.
+                    #
+                    # On accorde donc UN essai supplémentaire, sur session neuve.
+                    # Au-delà, on conclut à l'injoignabilité comme avant : la file
+                    # est FIFO, insister davantage ferait attendre les tâches des
+                    # autres machines derrière celle-ci.
+                    last_exc = exc
+                    if attempt >= 2:
+                        unreachable = True
+                        break
+                    # Le motif n'était journalisé nulle part : « injoignable »
+                    # s'écrivait sans la moindre cause, ce qui a rendu le
+                    # diagnostic impossible sans exporter le journal du client.
+                    logging.warning("⚠️ Tâche #%s : %s sur %s — nouvel essai sur "
+                                    "session neuve : %s",
+                                    task_id, type(exc).__name__,
+                                    ctx.machine.addresseip, exc)
+                    time.sleep(RETRY_SLEEP)
 
                 except Exception as exc:
                     last_exc = exc
@@ -826,10 +1036,11 @@ def process_device_queue() -> None:
                 # l'adhérent n'était jamais programmé sur une machine éteinte,
                 # même après son retour. Elle est rejouée dès que la machine
                 # redevient joignable (voir refresh_machines_loop).
+                tentatives, delai = defer_task(task_id)
                 logging.warning("⏸️ Tâche #%s : %s injoignable, mise en attente "
-                                "(rejouée au retour de la machine)",
-                                task_id, ctx.machine.addresseip)
-                defer_task(task_id)
+                                "(essai %s, prochain rejeu dans %s min)",
+                                task_id, ctx.machine.addresseip,
+                                tentatives, round(delai / 60))
             else:
                 logging.error("❌ Tâche #%s abandonnée après %s échecs : %s",
                               task_id, MAX_RETRIES, last_exc)
@@ -1201,16 +1412,29 @@ def pousser_gabarit_local(pin, template_bytes, finger_id):
         try:
             logging.info("Envoi de l'empreinte vers %s (id %s)", ip, ctx.machine.id)
             with ctx.lock:
-                # Une session C3 ne répond que ~3,5 s : on la renouvelle DANS le
-                # verrou, sinon le thread temps réel consomme le premier appel.
-                if isinstance(adapter, PlcommAdapter):
-                    if not attempt_c3_reconnection(ctx, max_retries=2):
-                        raise ConnectionError(
-                            f"C3 {ip} : session non rétablie pour l'envoi d'empreinte")
+                # On emprunte la session en cours plutôt que d'en rouvrir une
+                # (voir ensure_c3_session). Ce chemin n'a pas de boucle de
+                # réessai, donc on renouvelle nous-mêmes après un premier
+                # échec : la session reste ainsi la seule explication écartée
+                # avant de déclarer l'envoi perdu.
+                est_c3 = isinstance(adapter, PlcommAdapter)
+                if est_c3 and not ensure_c3_session(ctx):
+                    raise ConnectionError(
+                        f"C3 {ip} : session non rétablie pour l'envoi d'empreinte")
 
                 ok = adapter.add_fingerprint(user_id=pin,
                                              fingerprint_template=template_bytes,
                                              finger_id=finger_id)
+
+                if not ok and est_c3:
+                    logging.info("Empreinte refusée par %s, nouvel essai sur "
+                                 "session neuve", ip)
+                    if not ensure_c3_session(ctx, force_reconnect=True):
+                        raise ConnectionError(
+                            f"C3 {ip} : session non rétablie pour l'envoi d'empreinte")
+                    ok = adapter.add_fingerprint(user_id=pin,
+                                                 fingerprint_template=template_bytes,
+                                                 finger_id=finger_id)
 
             if ok:
                 resultats[ip] = "SUCCESS"

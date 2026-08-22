@@ -212,7 +212,10 @@ def _ts_value(val) -> Optional[int]:
 
 
 def _check_tcp(ip: str, port: int, timeout: float = 2.0) -> bool:
-    """Vérifie si un port TCP est joignable (connexion réelle, pas de cache)."""
+    """Vérifie si un port TCP est joignable (connexion réelle, pas de cache).
+
+    ⛔ NE JAMAIS appeler sur un C3 : voir _c3_session_vivante juste en dessous.
+    """
     try:
         sock = socket.create_connection((ip, port), timeout=timeout)
         sock.close()
@@ -221,12 +224,56 @@ def _check_tcp(ip: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+# Au-delà de ce délai sans une seule réponse du panneau, on cesse d'annoncer la
+# session comme vivante. La boucle temps réel appelle GetRTLog cinq fois par
+# seconde et rafraîchit last_seen sur CHAQUE réponse, y compris « rien à lire » :
+# 15 s laissent donc passer une reconnexion en cours sans faire clignoter le
+# statut, tout en signalant un thread temps réel réellement mort.
+C3_SESSION_FRAICHEUR = 15.0
+
+
+def _c3_session_vivante(adapter) -> bool:
+    """État d'un C3, SANS ouvrir la moindre socket vers lui.
+
+    Un C3 ne délivre qu'un seul handle à la fois : ouvrir une connexion parallèle
+    sur son port SDK évince la session en cours (règle déjà énoncée dans
+    DeviceContext.bind_handle). _check_tcp en ouvrait une VRAIE toutes les
+    5 secondes depuis ce thread de statut.
+
+    A/B contrôlé le 2026-08-21 sur le banc 192.168.1.205, app arrêtée, 120 s par
+    phase :
+
+        sans sonde ........ 470 appels GetRTLog,   0 retour -2  (0,0 %)
+        sonde TCP / 5 s ... 590 appels GetRTLog, 589 retours -2 (99,8 %)
+                            premier -2 à t+0,3 s, session jamais revenue
+
+    Une seule sonde tue la session définitivement. Depuis que chaque -2 déclenche
+    un Disconnect+Connect (commit b448cef du 2026-08-18), cela produisait 7 000 à
+    14 600 sessions TCP par jour sur un panneau à table de sockets minuscule :
+    badges acceptés avec plusieurs secondes de retard, badges refusés, puis
+    redémarrages spontanés du panneau.
+
+    La même sonde avait déjà été retirée de la boucle temps réel le 2026-08-18 ;
+    cet appel-ci avait survécu. On lit donc l'état de la session déjà ouverte,
+    que la boucle temps réel tient à jour.
+    """
+    if not getattr(adapter, "handle", None):
+        return False
+    vu = getattr(adapter, "last_seen", None)
+    if not vu:
+        return False
+    return (time.time() - vu) < C3_SESSION_FRAICHEUR
+
+
 def send_machine_status(machine, adapter, app_version: str = "v1"):
     """Broadcast machine status change to WebSocket clients in real-time."""
     if app_version == "v2":
         connected = adapter.is_connected()
     elif machine.type == "PUSH":
         connected = adapter.is_connected() if hasattr(adapter, "is_connected") else getattr(adapter, "connected", False)
+    elif machine.type == "C3":
+        # Surtout pas _check_tcp ici : la sonde évince la session SDK du panneau.
+        connected = _c3_session_vivante(adapter)
     else:
         connected = _check_tcp(machine.addresseip, int(machine.port))
 
