@@ -8,6 +8,8 @@ from enum import Enum
 import logging, time, ctypes, os
 from ctypes import *
 from services.addAndAuthorizeUser import CONNECT_TIMEOUT_MS
+from services.c3_timezone import ecrire_timezone
+from services.zkem_timezone import slot_valide, SLOT_DEFAUT
 import platform
 
 
@@ -40,16 +42,28 @@ class DeviceAdapter(ABC):
 
     # ---- opérations métier
     @abstractmethod
-    def add_user(self, pin, name ,card, start, end) -> bool: ...
+    def add_user(self, pin, name, card, start, end,
+                 timezone_slot=None, weekly_schedule=None) -> bool: ...
 
     @abstractmethod
     def delete_user(self, pin, finger_id=None) -> bool: ...
 
     @abstractmethod
-    def authorize_user(self, pin) -> bool: ...
+    def authorize_user(self, pin,
+                       timezone_slot=None, weekly_schedule=None) -> bool: ...
 
     @abstractmethod
     def unauthorize_user(self, pin) -> bool: ...
+
+    def update_timezone(self, timezone_slot, weekly_schedule) -> bool:
+        """Reecrit un calendrier sans toucher a aucun utilisateur.
+
+        Implementation par defaut volontairement neutre : un type de
+        pointeuse qui ne sait pas restreindre les horaires n'a rien a
+        faire de ce message, et repondre False le ferait rejouer
+        indefiniment par la file de taches.
+        """
+        return True
 
     @abstractmethod
     def add_fingerprint(self,pin, fingerprint_template: bytes, finger_id: int, save_to_kafka: bool = True) -> bool: ...
@@ -360,7 +374,8 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
             logging.error(f"❌ Exception in get_pin_by_card: {e}")
             return None
 
-    def add_user(self, pin,name, card, start, end):
+    def add_user(self, pin, name, card, start, end,
+                 timezone_slot=None, weekly_schedule=None):
         carte = self._carte_normalisee(card)
 
         # to do set the card to 0 for old user
@@ -382,14 +397,66 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
                     f"\tEndTime={end}\tPassword=")
         return self._set(b"user", data)
 
+    def update_timezone(self, timezone_slot, weekly_schedule) -> bool:
+        """Reecrit la ligne `timezone` du panneau pour ce creneau.
+
+        Les fiches `userauthorize` qui pointent deja ce TimezoneId suivent
+        automatiquement : rien a reecrire cote utilisateurs.
+        """
+        applique = ecrire_timezone(self, timezone_slot, weekly_schedule,
+                                   self.machine.alias)
+        # ecrire_timezone rend SLOT_DEFAUT quand elle a renonce. Pour une
+        # demande portant sur un autre creneau, c'est un echec.
+        demande = slot_valide(timezone_slot)
+        return demande is None or demande == SLOT_DEFAUT or applique == demande
+
     def delete_user(self, pin, finger_id=None):
         if finger_id is None:
             return self._del(b"userauthorize", f"Pin={pin}")
         return self._del(b"templatev10",
                          f"Pin={pin}\tFingerID={finger_id}")
 
-    def authorize_user(self, pin):
-        data = f"Pin={pin}\tAuthorizeTimezoneId=1\tAuthorizeDoorId=1\r\nPin={pin}\tAuthorizeTimezoneId=1\tAuthorizeDoorId=2"
+    def authorize_user(self, pin, timezone_slot=None, weekly_schedule=None):
+        """Autorise le passage, dans le creneau horaire demande.
+
+        Le C3 n'a ni groupe ni combinaison de deverrouillage :
+        `userauthorize` porte directement (Pin, AuthorizeTimezoneId,
+        AuthorizeDoorId). Ecrire le calendrier puis y renvoyer la fiche suffit.
+
+        ecrire_timezone rend TOUJOURS un creneau exploitable : 1 (24/7, deja
+        present d'usine) si le cloud n'en envoie pas, ou si l'horaire est
+        illisible. La valeur 1 codee en dur jusqu'ici reste donc le
+        comportement par defaut, au caractere pres.
+
+        Les portes 1 et 2 restent codees en dur, comme avant : access_machine
+        porte pourtant door1..door4, et un panneau a quatre portes n'en ouvre
+        que deux. Sujet distinct, laisse en l'etat pour ne pas changer deux
+        choses a la fois.
+        """
+        slot = ecrire_timezone(self, timezone_slot, weekly_schedule,
+                               self.machine.alias)
+
+        # ⚠️ userauthorize ACCUMULE. Sa clé inclut AuthorizeTimezoneId : écrire
+        # un créneau différent AJOUTE une ligne au lieu de remplacer l'ancienne,
+        # et l'adhérent se retrouve autorisé sous les deux calendriers — le plus
+        # permissif l'emporte. Sans cette suppression, changer la timezone d'un
+        # adhérent ne l'aurait jamais restreint.
+        #
+        # Mesuré le 2026-08-25 sur le panneau 192.168.1.205 : créneau 7 puis
+        # créneau 1 laissait quatre lignes (7/porte1, 7/porte2, 1/porte1,
+        # 1/porte2) ; la même séquence précédée du _del en laisse deux.
+        #
+        # Le trou entre la suppression et l'écriture ne dure que le temps des
+        # deux appels SDK. Si la suppression échoue, on écrit quand même :
+        # refuser l'accès à un adhérent à jour serait pire qu'un droit trop
+        # large, mais ça se voit dans le journal.
+        if not self._del(b"userauthorize", f"Pin={pin}"):
+            logging.warning("Purge de userauthorize KO pour le pin %s sur %s — "
+                            "l'ancien créneau peut subsister et rester permissif",
+                            pin, self.machine.alias)
+
+        data = (f"Pin={pin}\tAuthorizeTimezoneId={slot}\tAuthorizeDoorId=1\r\n"
+                f"Pin={pin}\tAuthorizeTimezoneId={slot}\tAuthorizeDoorId=2")
         return self._set(b"userauthorize", data)
 
     def add_fingerprint(self, user_id, fingerprint_template, finger_id):

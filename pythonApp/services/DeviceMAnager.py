@@ -20,11 +20,11 @@ class DeviceContext:
             from services.zkem_adapter import ZkemAdapter
             self.adapter = ZkemAdapter(machine)
 
-        elif machine.type == "PUSH":
-            from services.adms_adapter import ADMSAdapter
-            self.adapter = ADMSAdapter(machine)
-
         else:
+            # Le type PUSH/ADMS a été retiré le 2026-08-25 : une fiche
+            # restée en base sur ce type tombe donc ici, comme n'importe
+            # quel type inconnu, et la machine est ignorée avec un message
+            # explicite plutôt que de faire échouer le démarrage du pont.
             raise ValueError(f"Type inconnu : {machine.type}")
 
     # Un C3 ne délivre QU'UN SEUL handle à la fois : en ouvrir un second fait

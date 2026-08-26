@@ -33,17 +33,13 @@ from dotenv import load_dotenv, set_key
 
 from services.websocket import start_ws_server, send_pointage, start_machine_status_broadcast
 from services.zkem_adapter import ZkemAdapter
-from services.adms_adapter import ADMSAdapter
-from services.adms_server import ADMSServer
-from services.MonitorADMS import monitor_adms
 from services.logger import setup_logging, log_memory_usage, start_memory_monitor
 
-# v2 imports
-from services.v2.startup import start_v2
-from services.v2.device_manager_v2 import DeviceManagerV2
-
-# Version globale — "v1" (legacy multi-protocole) ou "v2" (full PUSH/ADMS)
-app_version = "v1"
+# Le pont ne parle qu'à deux familles de pointeuse : C3 (Pull SDK) et
+# standalone (zkemkeeper). Le chemin ADMS/PUSH et la réécriture v2 qui
+# l'accompagnait ont été retirés le 2026-08-25 — le sujet PUSH repartira
+# dans un projet séparé. Aucune machine PUSH n'existait en base sur les
+# quatre tenants au moment du retrait.
 
 def get_app_data_dir():
     logging.info("Trying to get APPDATA environment variable...")
@@ -210,7 +206,6 @@ device_queue = Queue()
 # Renseignés au démarrage dans __main__, lus par /restart et par le thread de
 # rafraîchissement des machines.
 watchdog = None
-adms_server = None
 
 APP_STARTED_AT = time.time()
 
@@ -406,8 +401,7 @@ def fetch_machines_with_retry(tenant: str, gym_branch_id: str,
 
 
 def register_machine_monitor(wd: "MachineWatchdog", m, ctx,
-                             tenant: str, gym_branch_id: str,
-                             adms_server=None) -> None:
+                             tenant: str, gym_branch_id: str) -> None:
     """Enregistre auprès du watchdog le thread de monitoring adapté au type."""
     if m.type == "C3":
         def factory(ctx=ctx):
@@ -416,22 +410,6 @@ def register_machine_monitor(wd: "MachineWatchdog", m, ctx,
                 args=(ctx, stop_event_monitoring),
                 daemon=True,
                 name=f"RT-C3-{ctx.machine.addresseip}")
-
-    elif m.type == "PUSH":
-        adapter = ctx.adapter
-        if adms_server:
-            adms_server.register_adapter(adapter)
-        else:
-            logging.warning(
-                "⚠️ Machine PUSH %s sans serveur ADMS actif — "
-                "redémarrer le pont pour l'activer", m.addresseip)
-
-        def factory(m=m, adapter=adapter):
-            return threading.Thread(
-                target=monitor_adms,
-                args=(m, adapter, stop_event_monitoring, tenant, gym_branch_id),
-                daemon=True,
-                name=f"RT-PUSH-{m.addresseip}")
 
     else:  # STANDALONE_NEW_FIRMWARE
         def factory(m=m):
@@ -446,7 +424,7 @@ def register_machine_monitor(wd: "MachineWatchdog", m, ctx,
 
 
 def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str,
-                          adms_server=None, interval: int = 300) -> None:
+                          interval: int = 300) -> None:
     """
     Relit périodiquement la configuration des machines.
 
@@ -481,8 +459,7 @@ def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str
                         m.id, m.alias, m.addresseip, m.type
                     )
                     ctx = DeviceManager.register(m, tenant, gym_branch_id)
-                    register_machine_monitor(wd, m, ctx, tenant, gym_branch_id,
-                                             adms_server)
+                    register_machine_monitor(wd, m, ctx, tenant, gym_branch_id)
 
                 # Une machine peut être revenue après une coupure de courant :
                 # on rejoue alors ce qui avait été mis de côté en son absence.
@@ -492,6 +469,11 @@ def refresh_machines_loop(wd: "MachineWatchdog", tenant: str, gym_branch_id: str
                         logging.info("♻️ %s tâche(s) rejouée(s) — machine %s (%s) "
                                      "de nouveau joignable",
                                      requeued, m.id, m.addresseip)
+
+                    # Les tâches rejouées ne suffisent pas : celles d'une
+                    # machine absente plus de 24 h ont été purgées. L'état
+                    # voulu, lui, a survécu — on le réapplique.
+                    reconcilier_creneaux(m)
 
                     # Rien n'a jamais remis un C3 à l'heure : les panneaux
                     # dérivent depuis leur installation et c'est LEUR horodatage
@@ -592,9 +574,113 @@ def initialize_task_queue_db():
             next_attempt_at TIMESTAMP
         )
     """)
+    # État VOULU des créneaux, distinct de la file de tâches : un calendrier
+    # n'est pas un événement mais un état, réécrire le même est sans effet.
+    # C'est ce qui permet de rattraper une pointeuse absente plus longtemps que
+    # la rétention Kafka, là où une tâche, elle, aurait été purgée.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS timezone_state (
+            slot INTEGER PRIMARY KEY,
+            weekly_schedule TEXT,
+            revision INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     _migrer_task_queue(conn)
     conn.commit()
     conn.close()
+
+
+# Ce que chaque machine a déjà reçu, par révision. En mémoire volontairement :
+# au redémarrage du pont on repart de zéro et tout est réappliqué une fois, ce
+# qui est exactement le filet recherché. Écrire un calendrier déjà en place ne
+# coûte qu'une commande et ne dérange aucun adhérent.
+_creneaux_appliques = {}
+
+
+def enregistrer_creneau_voulu(slot, horaire):
+    """Retient le calendrier attendu pour ce créneau, et avance la révision.
+
+    Appelé à la réception du message, AVANT toute écriture sur les pointeuses :
+    si aucune n'est joignable, l'intention est quand même conservée.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        conn.execute(
+            "INSERT INTO timezone_state (slot, weekly_schedule, revision, updated_at) "
+            "VALUES (?, ?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM timezone_state), "
+            "        datetime('now')) "
+            "ON CONFLICT(slot) DO UPDATE SET "
+            "  weekly_schedule = excluded.weekly_schedule, "
+            "  revision = excluded.revision, "
+            "  updated_at = excluded.updated_at",
+            (int(slot), json.dumps(horaire) if horaire is not None else None))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def revision_creneaux() -> int:
+    """Révision courante de l'état voulu. 0 = le pont n'a jamais rien reçu."""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(revision), 0) FROM timezone_state").fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def creneaux_voulus():
+    """[(slot, horaire), ...] — l'état que les pointeuses devraient porter."""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        rows = conn.execute(
+            "SELECT slot, weekly_schedule FROM timezone_state ORDER BY slot").fetchall()
+    finally:
+        conn.close()
+
+    creneaux = []
+    for slot, brut in rows:
+        try:
+            creneaux.append((slot, json.loads(brut) if brut else None))
+        except (ValueError, TypeError):
+            logging.warning("Créneau %s illisible en base locale — ignoré", slot)
+    return creneaux
+
+
+def reconcilier_creneaux(machine) -> int:
+    """Remet les calendriers de CETTE machine en accord avec l'état voulu.
+
+    Passe par la file plutôt que d'écrire directement : une pointeuse ne tient
+    qu'une session à la fois, et la file est le seul endroit qui sérialise les
+    accès à un appareil. Elle apporte en prime la temporisation si la machine
+    retombe entre-temps.
+
+    Ne fait rien tant que la machine est déjà à jour — sans quoi chaque tour de
+    refresh_machines_loop réécrirait tous les calendriers du parc.
+    """
+    revision = revision_creneaux()
+    if _creneaux_appliques.get(machine.id) == revision:
+        return 0
+
+    creneaux = creneaux_voulus()
+    for slot, horaire in creneaux:
+        add_task_to_queue({
+            "machineId": machine.id,
+            "ip_address": machine.addresseip,
+            "port": str(machine.port),
+            "operation": "UPDATE_TIMEZONE",
+            "timezone_slot": slot,
+            "weekly_schedule": horaire,
+        })
+
+    _creneaux_appliques[machine.id] = revision
+    if creneaux:
+        logging.info("🕒 %s créneau(x) remis en file pour la machine %s (%s) "
+                     "— révision %s", len(creneaux), machine.id,
+                     machine.addresseip, revision)
+    return len(creneaux)
 
 
 def add_task_to_queue(task):
@@ -818,19 +904,13 @@ def delete_completedTasks():
 
 
 def get_device_context(machine_id):
-    """Retourne le DeviceContext pour une machine, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.get(machine_id)
-    else:
-        return DeviceManager.get(machine_id)
+    """Retourne le DeviceContext pour une machine."""
+    return DeviceManager.get(machine_id)
 
 
 def get_all_device_contexts():
-    """Retourne tous les DeviceContext, v1 ou v2."""
-    if app_version == "v2":
-        return DeviceManagerV2.all()
-    else:
-        return list(DeviceManager._registry.values())
+    """Retourne tous les DeviceContext."""
+    return list(DeviceManager._registry.values())
 
 
 def free_port(port, retries=3):
@@ -886,7 +966,9 @@ def process_device_queue() -> None:
                 task = json.loads(raw)
                 ctx = DeviceManager.get(task["machineId"])
                 op = task["operation"]
-                pin = task["user_pin"]
+                # .get() : UPDATE_TIMEZONE ne porte aucun utilisateur, et
+                # un KeyError ici détruirait la tâche sans la rejouer.
+                pin = task.get("user_pin")
             except Exception as exc:
                 logging.error("Tâche #%s invalide : %s", task_id, exc)
                 mark_task_as_completed(task_id)
@@ -930,29 +1012,39 @@ def process_device_queue() -> None:
                                 raise ConnectionError(
                                     f"C3 {ctx.machine.addresseip} : session non "
                                     f"rétablie pour la commande")
-                        elif isinstance(adapter, ADMSAdapter):
-                            # PUSH: pas besoin de connect, l'appareil est déjà connecté
-                            if not adapter.is_connected():
-                                raise RuntimeError("Appareil PUSH non connecté")
                         # Pas de adapter.connect() ici pour les ZKEM : _ensure_conn
                         # s'en charge, et sous zk_sdk_lock. L'appel direct entrait
                         # dans le SDK sans verrou — exactement ce qui fait planter
                         # le process quand le thread RT y est déjà.
 
                         if op == "ADD_USER":
+                            # .get() et non [] : les tâches déjà en file au
+                            # moment de la mise à jour du pont n'ont pas ces
+                            # deux clés, et doivent continuer de passer.
                             ok = adapter.add_user(pin,
                                                   task["user_name"],
                                                   task["card_no"],
                                                   task["start_date"],
-                                                  task["end_date"])
+                                                  task["end_date"],
+                                                  task.get("timezone_slot"),
+                                                  task.get("weekly_schedule"))
                             if ok:
-                                ok = adapter.authorize_user(pin)
+                                # Le C3 pose son creneau ICI et non dans
+                                # add_user : chez lui le calendrier vit dans
+                                # userauthorize, pas dans la fiche user.
+                                ok = adapter.authorize_user(
+                                    pin,
+                                    task.get("timezone_slot"),
+                                    task.get("weekly_schedule"))
 
                         elif op == "DELETE_USER":
                             ok = adapter.delete_user(pin)
 
                         elif op == "AUTHORIZE_USER":
-                            ok = adapter.authorize_user(pin)
+                            ok = adapter.authorize_user(
+                                pin,
+                                task.get("timezone_slot"),
+                                task.get("weekly_schedule"))
 
                         elif op == "UNAUTHORIZE_USER":
                             ok = adapter.unauthorize_user(pin)
@@ -968,6 +1060,11 @@ def process_device_queue() -> None:
                             )
                         elif op == "REMOVE_FINGERPRINT":
                             ok = adapter.delete_fingerprint(pin, task["finger_id"])
+
+                        elif op == "UPDATE_TIMEZONE":
+                            ok = adapter.update_timezone(
+                                task.get("timezone_slot"),
+                                task.get("weekly_schedule"))
                         else:
                             raise ValueError(f"Opération inconnue : {op}")
 
@@ -1069,10 +1166,54 @@ def run_device_queue_supervised() -> None:
             time.sleep(3)
 
 
+def _traiter_maj_creneau(json_message):
+    """Met en file la réécriture d'un calendrier sur les machines de CE poste.
+
+    Le message est diffusé à toutes les branches du tenant ; chaque poste ne
+    retient que la sienne, comme pour les demandes d'accès.
+    """
+    if str(json_message.get("gymBranchId")) != str(gym_branch_id):
+        return
+
+    creneau = json_message.get("timezoneSlot")
+    horaire = json_message.get("weeklySchedule")
+    if creneau is None:
+        logging.warning("UPDATE_TIMEZONE sans timezoneSlot — ignoré")
+        return
+
+    # Avant toute écriture : si aucune pointeuse ne répond, l'intention doit
+    # survivre à la purge de la file.
+    enregistrer_creneau_voulu(creneau, horaire)
+
+    mises_en_file = 0
+    for machine in json_message.get("machines", []):
+        if "addresseip" not in machine or "port" not in machine:
+            continue
+        add_task_to_queue({
+            "machineId": machine["id"],
+            "ip_address": machine["addresseip"],
+            "port": str(machine["port"]),
+            "operation": "UPDATE_TIMEZONE",
+            "timezone_slot": creneau,
+            "weekly_schedule": horaire,
+        })
+        mises_en_file += 1
+    logging.info("🕒 Créneau %s (%s) : %s machine(s) à mettre à jour",
+                 creneau, json_message.get("timezoneName"), mises_en_file)
+
+
 def process_message_pointage(message):
     try:
         json_message = json.loads(message)
         logging.info("Received message from new access request topic from tenant %s: %s", tenant, message)
+
+        # UPDATE_TIMEZONE réécrit un calendrier et ne concerne AUCUN
+        # adhérent : il n'a ni userPin, ni carte, ni dates de validité. Le
+        # contrôle de champs ci-dessous le rejetterait en silence.
+        if json_message.get("operation") == "UPDATE_TIMEZONE":
+            _traiter_maj_creneau(json_message)
+            return
+
         required_keys = ["userPin", "operation", "cardNo", "startDate", "endDate", "machines"]
         if all(key in json_message for key in required_keys) and str(json_message.get("gymBranchId")) == gym_branch_id:
             for machine in json_message.get("machines", []):
@@ -1086,7 +1227,17 @@ def process_message_pointage(message):
                         "operation": json_message["operation"],
                         "card_no": json_message["cardNo"],
                         "start_date": json_message["startDate"],
-                        "end_date": json_message["endDate"]
+                        "end_date": json_message["endDate"],
+                        # Le créneau horaire est porté PAR MACHINE : un même
+                        # adhérent, dans une même branche, peut avoir un
+                        # horaire sur la machine de musculation et un autre
+                        # sur celle de la salle de cours. Le repli sur le
+                        # niveau message garde la compatibilité avec un cloud
+                        # qui ne les enverrait qu'une fois.
+                        "timezone_slot": machine.get(
+                            "timezoneSlot", json_message.get("timezoneSlot")),
+                        "weekly_schedule": machine.get(
+                            "weeklySchedule", json_message.get("weeklySchedule")),
                     })
                 else:
                     logging.error("Missing required fields in machine configuration.")
@@ -1342,7 +1493,7 @@ def upload_face_multipart():
     RETRY_DELAY = 1
 
     for ctx in get_all_device_contexts():
-        branch = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+        branch = ctx.gymBranchId
         if str(branch) != str(currentGymBranchId):
             continue
 
@@ -1401,7 +1552,7 @@ def pousser_gabarit_local(pin, template_bytes, finger_id):
     resultats, succes, total = {}, 0, 0
 
     for ctx in get_all_device_contexts():
-        branch_id = ctx.gym_branch_id if app_version == "v2" else ctx.gymBranchId
+        branch_id = ctx.gymBranchId
         if str(branch_id) != str(currentGymBranchId):
             continue
 
@@ -1650,7 +1801,6 @@ def health():
             "uptimeSeconds": round(time.time() - APP_STARTED_AT, 1),
             "tenant": tenant,
             "gymBranchId": currentGymBranchId,
-            "version": app_version,
             "watchdogStaleSeconds": stale,
             "machines": machines,
             "machinesConnected": sum(1 for m in machines if m["rtConnected"]),
@@ -1665,8 +1815,13 @@ def health():
 
 @app.route('/api/version', methods=['GET'])
 def get_version():
-    """Retourne la version en cours (v1 ou v2)."""
-    return jsonify({"version": app_version}), 200
+    """Conservée pour le front, qui interroge cette route au démarrage.
+
+    Le pont n'a plus qu'un seul mode depuis le retrait d'ADMS ; la valeur
+    est figée plutôt que la route supprimée, pour ne pas casser un front
+    déployé qui l'appelle encore.
+    """
+    return jsonify({"version": "v1"}), 200
 
 
 @app.route('/api/test/add_user', methods=['POST'])
@@ -1710,7 +1865,7 @@ def test_add_user():
                 "error": "Machine non connectée",
                 "machine": ctx.machine.alias,
                 "ip": ctx.machine.addresseip,
-                "hint": "Vérifiez que la machine est en mode PUSH et pointe vers ce serveur sur le port 8088"
+                "hint": "Vérifiez que la pointeuse est allumée et joignable en TCP sur son port"
             }), 503
 
         # Tester add_user
@@ -1777,9 +1932,7 @@ def test_open_door():
 
         adapter = ctx.adapter
 
-        if app_version == "v2":
-            ok = adapter.open_door(door_no=1, duration=duration)
-        elif hasattr(adapter, 'open_door'):
+        if hasattr(adapter, 'open_door'):
             ok = adapter.open_door(duration_seconds=duration) if hasattr(adapter, 'ACUnlock') else adapter.open_door(door_no=1, duration=duration)
         else:
             ok = False
@@ -1808,22 +1961,16 @@ def test_queue_status():
             })
         conn.close()
 
-        # Commandes ADMS en attente dans les adapters
-        adapter_queues = {}
+        etat_machines = {}
         for ctx in get_all_device_contexts():
-            adapter = ctx.adapter
-            queue_len = len(getattr(adapter, '_command_queue', []))
-            adapter_queues[ctx.machine.alias] = {
+            etat_machines[ctx.machine.alias] = {
                 "machine_id": ctx.machine.id,
-                "connected": adapter.is_connected() if hasattr(adapter, 'is_connected') else None,
-                "sn": getattr(adapter, 'sn', None),
-                "commands_pending": queue_len,
+                "connected": getattr(ctx.adapter, "connected", None),
             }
 
         return jsonify({
-            "version": app_version,
             "sqlite_tasks": tasks,
-            "adapter_queues": adapter_queues
+            "machines": etat_machines
         }), 200
 
     except Exception as ex:
@@ -1842,16 +1989,11 @@ def get_devices():
             "ip": ctx.machine.addresseip,
             "port": ctx.machine.port,
             "original_type": ctx.machine.type,
-            "mode": "PUSH/ADMS" if app_version == "v2" else ctx.machine.type,
+            "mode": ctx.machine.type,
+            "connected": getattr(adapter, "connected", None),
         }
-        if app_version == "v2":
-            info["connected"] = adapter.is_connected()
-            info["sn"] = adapter.sn
-            info["last_seen"] = adapter.last_seen.isoformat() if adapter.last_seen else None
-        else:
-            info["connected"] = getattr(adapter, "connected", None)
         devices.append(info)
-    return jsonify({"version": app_version, "devices": devices}), 200
+    return jsonify({"devices": devices}), 200
 
 
 @app.route('/api/machines/status', methods=['GET'])
@@ -1860,12 +2002,9 @@ def get_machines_status():
     for ctx in get_all_device_contexts():
         adapter = ctx.adapter
         machine = ctx.machine
-        if app_version == "v2":
-            connected = adapter.is_connected()
-            last_seen_ts = int(adapter.last_seen.timestamp()) if adapter.last_seen else None
-        else:
-            connected = getattr(adapter, "connected", False) or (getattr(adapter, "handle", None) is not None)
-            last_seen_ts = None
+        connected = (getattr(adapter, "connected", False)
+                     or getattr(adapter, "handle", None) is not None)
+        last_seen_ts = None
         machines.append({
             "type": "machine_status_changed",
             "machineId": machine.id,
@@ -1894,10 +2033,6 @@ def reconnect_machine(machine_id):
     mtype = ctx.machine.type
     logging.info(f"🔄 Reconnect demandé pour machine {machine_id} type={mtype}")
     try:
-        if app_version == "v2":
-            logging.info(f"  v2 machine {machine_id} — reconnexion automatique via ADMS heartbeat")
-            return jsonify({"status": "acknowledged", "message": "v2 device reconnection is automatic via heartbeat"}), 200
-
         if mtype == MachineType.C3.name or mtype == "C3":
             success = attempt_c3_reconnection(ctx)
             if success:
@@ -1916,14 +2051,6 @@ def reconnect_machine(machine_id):
                 logging.info(f"✅ Standalone {machine_id} reconnecté")
                 return jsonify({"status": "reconnected"}), 200
             return jsonify({"error": "Standalone reconnection failed"}), 500
-
-        if mtype == "PUSH":
-            if isinstance(ctx.adapter, ADMSAdapter):
-                with ctx.lock:
-                    ctx.adapter.disconnect()
-                logging.info(f"🔌 PUSH {machine_id} marqué déconnecté — en attente du handshake")
-                return jsonify({"status": "disconnected", "message": "PUSH device marked disconnected, waiting for handshake"}), 200
-            return jsonify({"error": "PUSH adapter not found"}), 500
 
         return jsonify({"error": f"Unknown machine type: {mtype}"}), 400
     except Exception as e:
@@ -1971,7 +2098,9 @@ def enqueue_access_tasks():
             "operation": data["operation"],
             "card_no": data["cardNo"],
             "start_date": data["startDate"],
-            "end_date": data["endDate"]
+            "end_date": data["endDate"],
+            "timezone_slot": m.get("timezoneSlot", data.get("timezoneSlot")),
+            "weekly_schedule": m.get("weeklySchedule", data.get("weeklySchedule")),
         }
         add_task_to_queue(task)
         queued += 1
@@ -2005,14 +2134,10 @@ def open_door_api():
         adapter = ctx.adapter
 
         with ctx.lock:
-            if app_version == "v2":
-                ok = adapter.open_door(door_no=door_no, duration=duration)
-            elif isinstance(adapter, PlcommAdapter):
+            if isinstance(adapter, PlcommAdapter):
                 ok = adapter.open_door(door_no=door_no, duration=duration)
             elif isinstance(adapter, ZkemAdapter):
                 ok = adapter.open_door(duration_seconds=duration)
-            elif isinstance(adapter, ADMSAdapter):
-                ok = adapter.open_door(door_no=door_no, duration=duration)
             else:
                 abort(400, f"Type d'adapter non supporté : {type(adapter).__name__}")
 
@@ -2072,10 +2197,7 @@ def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
                 ms = AccessMachineService()
                 machines = ms.get_access_machines(str(gym_branch_id), str(tenant))
                 for m in machines:
-                    if app_version == "v2":
-                        DeviceManagerV2.register(m, tenant, gym_branch_id)
-                    else:
-                        DeviceManager.register(m, tenant, gym_branch_id)
+                    DeviceManager.register(m, tenant, gym_branch_id)
                 ctx = get_device_context(machine_id)
             except Exception as e:
                 logging.error(f"❌ fallback register machines failed: {e}")
@@ -2099,14 +2221,6 @@ def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
 
     except Exception as e:
         logging.error(f"❌ Error in get_fingerprints_api: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/adms/status', methods=['GET'])
-def adms_status():
-    try:
-        server = ADMSServer()
-        return jsonify(server.get_connected_devices()), 200
-    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/restart', methods=['POST'])
@@ -2137,24 +2251,13 @@ def soft_restart():
                 return
             logging.info("🔌 Machines rechargées : %s", machines)
 
-            if app_version == "v2":
-                from services.v2.adms_server_v2 import ADMSServerV2
-                from services.v2.monitor_v2 import setup_attendance_callback
-                adms_srv = ADMSServerV2()
-                for m in machines:
-                    ctx = DeviceManagerV2.register(m, tenant, gym_branch_id)
-                    adms_srv.register_adapter(ctx.adapter)
-                setup_attendance_callback(adms_srv, tenant, gym_branch_id)
-                logging.info("✅ Rechargement v2 terminé")
-                return
-
             added = 0
             for m in machines:
                 if DeviceManager.get(m.id) is not None:
                     continue
                 ctx = DeviceManager.register(m, tenant, gym_branch_id)
                 register_machine_monitor(watchdog, m, ctx,
-                                         tenant, gym_branch_id, adms_server)
+                                         tenant, gym_branch_id)
                 added += 1
 
             logging.info("✅ Rechargement terminé — %s machine(s) ajoutée(s). "
@@ -2206,29 +2309,20 @@ if __name__ == '__main__':
     machineService = AccessMachineService()
 
     if len(sys.argv) < 3:
-        logging.error("Expected arguments: TENANT GYM_BRANCH_ID [--version v1|v2]")
+        logging.error("Expected arguments: TENANT GYM_BRANCH_ID")
         sys.exit(1)
 
     # tenant / currentGymBranchId sont déjà résolus au chargement du module
     # (ils conditionnent les group.id Kafka) — on ne fait que les refléter ici.
     gym_branch_id = currentGymBranchId
 
-    # Parse --version argument
+    # --version v1|v2 est encore accepté mais ignoré : le raccourci de
+    # l'installeur le passe peut-être, et une erreur de démarrage sur un
+    # argument devenu sans objet empêcherait le pont de se lancer.
     if "--version" in sys.argv:
-        idx = sys.argv.index("--version")
-        if idx + 1 < len(sys.argv):
-            app_version = sys.argv[idx + 1].lower()
-        else:
-            logging.error("--version requires a value (v1 or v2)")
-            sys.exit(1)
-    else:
-        app_version = "v1"
+        logging.info("--version est ignoré : le pont n'a plus qu'un mode")
 
-    if app_version not in ("v1", "v2"):
-        logging.error("Version invalide: %s. Attendu: v1 ou v2", app_version)
-        sys.exit(1)
-
-    logging.info("Current tenant: %s    gymbranchid: %s    version: %s", tenant, gym_branch_id, app_version)
+    logging.info("Current tenant: %s    gymbranchid: %s", tenant, gym_branch_id)
 
     try:
         # Surveillance mémoire en observation seule. Pas de redémarrage
@@ -2250,78 +2344,53 @@ if __name__ == '__main__':
         machines = fetch_machines_with_retry(tenant, gym_branch_id)
         logging.info("Machines disponibles: %s", machines)
 
-        if app_version == "v2":
-            # ── v2 : Full PUSH/ADMS ──────────────────────────────────
-            start_v2(
-                machines=machines,
-                tenant=tenant,
-                gym_branch_id=gym_branch_id,
-                stop_event=stop_event_monitoring,
-                task_queue_functions={
-                    "initialize_db": initialize_task_queue_db,
-                    "add_task": add_task_to_queue,
-                    "get_next": get_next_task_from_queue,
-                    "mark_completed": mark_task_as_completed,
-                }
-            )
-        else:
-            # ── v1 : Legacy multi-protocole (C3 / STANDALONE / PUSH) ──
-            initialize_task_queue_db()
+        initialize_task_queue_db()
 
-            # Les machines DOIVENT être enregistrées avant le démarrage du thread
-            # de queue. Sinon il dépile immédiatement les tâches héritées de la
-            # session précédente alors que DeviceManager est encore vide, et les
-            # écarte comme « machine inconnue » : 10 tâches perdues en une
-            # journée, une à chaque redémarrage.
-            for m in machines:
-                DeviceManager.register(m, tenant, gym_branch_id)
-                # Uniquement si la machine répond : sinon chaque tâche remise en
-                # file coûterait une sonde TCP pour être aussitôt remise de côté.
-                # Un C3 n'est jamais prêt à cet instant (son thread temps réel
-                # n'a pas encore ouvert de session) : c'est refresh_machines_loop
-                # qui rejouera ses tâches au cycle suivant.
-                if machine_ready_for_requeue(m):
-                    requeued = requeue_tasks_for_machine(m.id)
-                    if requeued:
-                        logging.info("♻️ %s tâche(s) en attente réactivée(s) "
-                                     "pour la machine %s", requeued, m.id)
+        # Les machines DOIVENT être enregistrées avant le démarrage du thread
+        # de queue. Sinon il dépile immédiatement les tâches héritées de la
+        # session précédente alors que DeviceManager est encore vide, et les
+        # écarte comme « machine inconnue » : 10 tâches perdues en une
+        # journée, une à chaque redémarrage.
+        for m in machines:
+            DeviceManager.register(m, tenant, gym_branch_id)
+            # Uniquement si la machine répond : sinon chaque tâche remise en
+            # file coûterait une sonde TCP pour être aussitôt remise de côté.
+            # Un C3 n'est jamais prêt à cet instant (son thread temps réel
+            # n'a pas encore ouvert de session) : c'est refresh_machines_loop
+            # qui rejouera ses tâches au cycle suivant.
+            if machine_ready_for_requeue(m):
+                requeued = requeue_tasks_for_machine(m.id)
+                if requeued:
+                    logging.info("♻️ %s tâche(s) en attente réactivée(s) "
+                                 "pour la machine %s", requeued, m.id)
+                reconcilier_creneaux(m)
 
-            threading.Thread(target=run_device_queue_supervised,
-                             daemon=True,
-                             name="DeviceQueueThread").start()
+        threading.Thread(target=run_device_queue_supervised,
+                         daemon=True,
+                         name="DeviceQueueThread").start()
 
-            watchdog = MachineWatchdog()
+        watchdog = MachineWatchdog()
 
-            adms_server = None
-            if any(m.type == "PUSH" for m in machines):
-                adms_server = ADMSServer(port=8088)
-                adms_server.start()
-                logging.info("🚀 Serveur ADMS démarré (port 8088)")
+        for m in machines:
+            register_machine_monitor(watchdog, m, DeviceManager.get(m.id),
+                                     tenant, gym_branch_id)
 
-            for m in machines:
-                register_machine_monitor(watchdog, m, DeviceManager.get(m.id),
-                                         tenant, gym_branch_id, adms_server)
+        watchdog.start()
 
-            watchdog.start()
-
-            # Sans ça, une machine ajoutée en back-office reste inconnue jusqu'au
-            # prochain lancement de l'application, et ses tâches d'accès sont
-            # silencieusement perdues.
-            threading.Thread(
-                target=refresh_machines_loop,
-                args=(watchdog, tenant, gym_branch_id, adms_server),
-                daemon=True,
-                name="MachineRefresh").start()
-        # ───────────────────────────────────────────────────────────────
+        # Sans ça, une machine ajoutée en back-office reste inconnue jusqu'au
+        # prochain lancement de l'application, et ses tâches d'accès sont
+        # silencieusement perdues.
+        threading.Thread(
+            target=refresh_machines_loop,
+            args=(watchdog, tenant, gym_branch_id),
+            daemon=True,
+            name="MachineRefresh").start()
 
         start_kafka_consumers()
 
-        def _get_all_devices_with_version():
-            return [
-                (ctx.machine, ctx.adapter, app_version)
-                for ctx in get_all_device_contexts()
-            ]
-        start_machine_status_broadcast(_get_all_devices_with_version, interval=5)
+        def _tous_les_appareils():
+            return [(ctx.machine, ctx.adapter) for ctx in get_all_device_contexts()]
+        start_machine_status_broadcast(_tous_les_appareils, interval=5)
 
         while True:
             time.sleep(0.01)

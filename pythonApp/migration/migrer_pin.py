@@ -167,12 +167,29 @@ class Panneau:
         self.users, self.templates, self.autorisations = [], [], []
 
     def rafraichir(self):
-        self.users = parser_lignes(lire_table(self.pl, self.handle, b"user", TAILLE_USER))
+        """Relit les trois tables. Rend False si l'une d'elles a echoue.
+
+        ⚠️ Une lecture ratee rend None, que parser_lignes transforme en liste
+        vide — indiscernable d'une table reellement vide. Le danger n'est pas
+        theorique : si templatev10 echoue pendant que user reussit, le script
+        croit l'employe sans empreinte, en ecrit zero, compare 0 a 0 au controle
+        — qui passe — puis SUPPRIME l'ancien PIN. Les empreintes sont perdues,
+        et la sauvegarde JSON ne contient rien pour les retrouver.
+        Vu en production le 2026-08-22 : les trois lectures ont rendu -2 d'un
+        coup. On distingue donc l'echec du vide, et l'appelant s'arrete.
+        """
+        brut_users = lire_table(self.pl, self.handle, b"user", TAILLE_USER)
         # Pas de filtre 'Pin=' sur templatev10 : selon le firmware il rend -101.
-        self.templates = parser_lignes(
-            lire_table(self.pl, self.handle, b"templatev10", TAILLE_TEMPLATES))
-        self.autorisations = parser_lignes(
-            lire_table(self.pl, self.handle, b"userauthorize", TAILLE_USER))
+        brut_tpl = lire_table(self.pl, self.handle, b"templatev10", TAILLE_TEMPLATES)
+        brut_auth = lire_table(self.pl, self.handle, b"userauthorize", TAILLE_USER)
+
+        if brut_users is None or brut_tpl is None or brut_auth is None:
+            return False
+
+        self.users = parser_lignes(brut_users)
+        self.templates = parser_lignes(brut_tpl)
+        self.autorisations = parser_lignes(brut_auth)
+        return True
 
     def fiche(self, pin):
         for u in self.users:
@@ -292,7 +309,11 @@ def main():
 
     try:
         panneau = Panneau(pl, handle)
-        panneau.rafraichir()
+        if not panneau.rafraichir():
+            sortir(1, f"{ROUGE}Lecture du panneau impossible — le SDK a rendu -2 "
+                      f"sur au moins une table.{RAZ}\n"
+                      f"Rien n'a ete ecrit. Verifiez que pythonApp est bien ferme, "
+                      f"attendez quelques secondes et relancez.")
 
         fiche = panneau.fiche(ancien)
         if fiche is None:
@@ -415,8 +436,12 @@ def main():
             ok, ret = ecrire_autorisations(pl, handle, nouveau, autorisations)
             print(f"  autorisations : {'ok' if ok else f'echec ({ret})'}")
 
-        # Controle AVANT toute suppression.
-        panneau.rafraichir()
+        # Controle AVANT toute suppression. Si la relecture echoue, on ne peut
+        # RIEN affirmer : l'ancien PIN reste en place.
+        if not panneau.rafraichir():
+            sortir(1, f"\n{ROUGE}Relecture de controle impossible (SDK -2).\n"
+                      f"L'ancien PIN {ancien} est CONSERVE : sans controle, le "
+                      f"supprimer serait un pari.{RAZ}")
         verif = panneau.gabarits(nouveau)
         if panneau.fiche(nouveau) is None or len(verif) != len(gabarits):
             sortir(1, f"\n{ROUGE}CONTROLE ECHOUE : {len(verif)}/{len(gabarits)} "

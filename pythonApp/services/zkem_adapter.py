@@ -19,6 +19,7 @@ import win32com.client
 
 from services.adapters import DeviceAdapter
 from services.common import zk_sdk_lock, tcp_reachable
+from services.zkem_timezone import appliquer_timezone, ecrire_creneau
 
 
 class ZkemAdapter(DeviceAdapter):
@@ -123,8 +124,14 @@ class ZkemAdapter(DeviceAdapter):
         return wrapper
 
     @_ensure_conn
-    def add_user(self, pin, name ,card_no, start_time, end_time) -> bool:
-        """Ajout + règle de validité"""
+    def add_user(self, pin, name, card_no, start_time, end_time,
+                 timezone_slot=None, weekly_schedule=None) -> bool:
+        """Ajout + règle de validité + créneau horaire hebdomadaire.
+
+        timezone_slot / weekly_schedule sont facultatifs : un cloud plus
+        ancien que ce pont ne les envoie pas, et l'adhérent garde alors
+        le groupe 1 (24/7) — exactement le comportement d'avant.
+        """
         self.zk.EnableDevice(self.mn, False)
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
@@ -151,7 +158,43 @@ class ZkemAdapter(DeviceAdapter):
             logging.exception("Date format err: %s", ex)
             ok = False
 
+        # Le créneau horaire se pose APRÈS la période de validité, et sous le
+        # même EnableDevice(False) : les deux forment la règle d'accès de
+        # l'adhérent, un badge présenté entre les deux lirait une règle à
+        # moitié écrite.
+        if ok:
+            ok = appliquer_timezone(self.zk, self.mn, pin, timezone_slot,
+                                    weekly_schedule, self.machine.alias)
+
+        # RefreshData : sans lui la pointeuse continue de servir sa copie en
+        # mémoire, et le calendrier fraîchement écrit n'est pris en compte
+        # qu'au redémarrage de l'appareil.
+        try:
+            self.zk.RefreshData(self.mn)
+        except Exception as ex:
+            logging.warning("RefreshData après add_user : %s", ex)
+
         self.zk.EnableDevice(self.mn, True)
+        return ok
+
+    @_ensure_conn
+    def update_timezone(self, timezone_slot, weekly_schedule) -> bool:
+        """Réécrit un calendrier sans toucher à aucun adhérent.
+
+        Les utilisateurs déjà placés dans le groupe correspondant changent
+        d'horaire du même coup — c'est tout l'intérêt : une modification de
+        timezone s'applique sans repousser un seul accès.
+        """
+        self.zk.EnableDevice(self.mn, False)
+        try:
+            ok = ecrire_creneau(self.zk, self.mn, timezone_slot,
+                                weekly_schedule, self.machine.alias)
+        finally:
+            try:
+                self.zk.RefreshData(self.mn)
+            except Exception as ex:
+                logging.warning("RefreshData après update_timezone : %s", ex)
+            self.zk.EnableDevice(self.mn, True)
         return ok
 
     @_ensure_conn  # réutilise le décorateur existant
@@ -387,7 +430,8 @@ class ZkemAdapter(DeviceAdapter):
         return self.zk.SSR_DeleteEnrollData(self.mn, pin, 1)
 
     @_ensure_conn
-    def authorize_user(self, pin) -> bool:
+    def authorize_user(self, pin,
+                       timezone_slot=None, weekly_schedule=None) -> bool:
         """Pas d'équivalent précis dans zkemkeeper ; toujours True."""
         return True
 

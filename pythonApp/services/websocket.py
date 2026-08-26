@@ -98,7 +98,7 @@ async def _ws_handler(ws: WebSocketServerProtocol):
                     try:
                         import main as _main
                         for ctx in _main.get_all_device_contexts():
-                            send_machine_status(ctx.machine, ctx.adapter, _main.app_version)
+                            send_machine_status(ctx.machine, ctx.adapter)
                     except Exception as e:
                         logger.warning("[WebSocket] Could not send initial machine statuses: %s", e)
 
@@ -265,13 +265,9 @@ def _c3_session_vivante(adapter) -> bool:
     return (time.time() - vu) < C3_SESSION_FRAICHEUR
 
 
-def send_machine_status(machine, adapter, app_version: str = "v1"):
+def send_machine_status(machine, adapter):
     """Broadcast machine status change to WebSocket clients in real-time."""
-    if app_version == "v2":
-        connected = adapter.is_connected()
-    elif machine.type == "PUSH":
-        connected = adapter.is_connected() if hasattr(adapter, "is_connected") else getattr(adapter, "connected", False)
-    elif machine.type == "C3":
+    if machine.type == "C3":
         # Surtout pas _check_tcp ici : la sonde évince la session SDK du panneau.
         connected = _c3_session_vivante(adapter)
     else:
@@ -299,22 +295,22 @@ def send_machine_status(machine, adapter, app_version: str = "v1"):
     broadcast_ws(payload)
 
 
-def send_machine_status_from_ctx(ctx, app_version: str = "v1"):
+def send_machine_status_from_ctx(ctx):
     """Convenience: extract machine+adapter from a DeviceContext object."""
-    send_machine_status(ctx.machine, ctx.adapter, app_version)
+    send_machine_status(ctx.machine, ctx.adapter)
 
 
 def start_machine_status_broadcast(get_devices_fn, interval: int = 5):
     """
     Lance un thread qui broadcast l'état de toutes les machines toutes les `interval` secondes.
-    `get_devices_fn` doit retourner une liste de tuples (machine, adapter, app_version).
+    `get_devices_fn` doit retourner une liste de tuples (machine, adapter).
     """
     def _loop():
         while True:
             try:
                 devices = get_devices_fn()
-                for machine, adapter, app_version in devices:
-                    send_machine_status(machine, adapter, app_version)
+                for machine, adapter in devices:
+                    send_machine_status(machine, adapter)
             except Exception as e:
                 logger.warning("[Broadcast] Erreur lors du broadcast périodique: %s", e)
             time.sleep(interval)

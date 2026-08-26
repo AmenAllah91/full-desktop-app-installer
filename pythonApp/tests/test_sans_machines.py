@@ -467,5 +467,172 @@ def _():
         pass  # comportement attendu
 
 
+# ─── Créneaux horaires ZKTeco (services/zkem_timezone.py) ────────────────
+#
+# L'encodage est la pièce la plus facile à casser sans s'en apercevoir : une
+# chaîne mal formée est acceptée par SetTZInfo et produit une porte qui ne
+# s'ouvre jamais, ou pire, qui s'ouvre tout le temps. Format relevé sur
+# SenseFace 3A le 2026-08-25 : 56 caractères, 7 jours × HHMM+HHMM, DIMANCHE
+# EN PREMIER.
+
+from services.zkem_timezone import (  # noqa: E402
+    encoder_semaine, decoder_semaine, slot_valide, HoraireInvalide,
+    HORAIRE_24_7, SLOT_DEFAUT, SLOT_MAX, FERME,
+)
+
+
+@suite.test("horaire 24/7 -> les 56 caracteres attendus")
+def _():
+    horaire = {j: "00:00-23:59" for j in
+               ["sunday", "monday", "tuesday", "wednesday",
+                "thursday", "friday", "saturday"]}
+    egal(encoder_semaine(horaire), HORAIRE_24_7, "le 24/7 doit etre canonique")
+    egal(len(HORAIRE_24_7), 56, "un calendrier fait 56 caracteres")
+
+
+@suite.test("un jour absent est FERME, pas ouvert")
+def _():
+    # Le piege qui compte : si l'absence se traduisait en 00:00-23:59, une
+    # activite du samedi ouvrirait la porte les sept jours.
+    chaine = encoder_semaine({"saturday": "08:00-12:00"})
+    egal(len(chaine), 56, "56 caracteres quoi qu'il arrive")
+    egal(chaine[:48], "00000000" * 6, "les six premiers jours doivent etre fermes")
+    egal(chaine[48:], "08001200", "le samedi est le 7e bloc")
+
+
+@suite.test("dimanche est le PREMIER bloc")
+def _():
+    # Verifie contre une configuration relevee a la main sur la 192.168.2.230 :
+    # calendrier 2, mardi 08:14-11:59, les six autres jours a 24/7.
+    horaire = {j: "00:00-23:59" for j in
+               ["sunday", "monday", "wednesday", "thursday", "friday", "saturday"]}
+    horaire["tuesday"] = "08:14-11:59"
+    chaine = encoder_semaine(horaire)
+    egal(chaine,
+         "00002359" "00002359" "08141159" "00002359"
+         "00002359" "00002359" "00002359",
+         "le mardi doit tomber sur le 3e bloc (dimanche en premier)")
+
+
+@suite.test("aller-retour encodage / decodage")
+def _():
+    horaire = {"monday": "06:00-12:00", "friday": "16:30-22:45"}
+    relu = decoder_semaine(encoder_semaine(horaire))
+    egal(relu["monday"], "06:00-12:00", "lundi conserve")
+    egal(relu["friday"], "16:30-22:45", "vendredi conserve")
+    egal(relu["sunday"], None, "un jour non cite se relit ferme")
+
+
+@suite.test("horaire malforme -> le jour se ferme, la chaine reste bien formee")
+def _():
+    # Ce test exigeait autrefois une exception. Il a change avec le correctif du
+    # 2026-08-26 : lever faisait rejeter la SEMAINE entiere, et appliquer_timezone
+    # retombait alors sur le creneau par defaut, c'est-a-dire 24h/24. Fermer le
+    # jour fautif est le repli sur ; ce qui doit rester vrai, c'est qu'on n'ecrit
+    # jamais une chaine bancale sur la pointeuse.
+    for mauvais in [{"monday": "06:00"}, {"monday": "6h-12h"},
+                    {"monday": "25:00-26:00"}, {"monday": "06:00-1200"}]:
+        chaine = encoder_semaine(mauvais)
+        egal(len(chaine), 56, "56 caracteres quoi qu'il arrive (%r)" % mauvais)
+        egal(chaine, FERME * 7, "tous les jours fermes pour %r" % mauvais)
+
+
+@suite.test("un horaire qui n'est pas un dict reste une erreur franche")
+def _():
+    # La tolerance porte sur les JOURS, pas sur la forme du message : recevoir
+    # autre chose qu'un dict signale un bug de serialisation, pas une saisie.
+    for mauvais in ["06:00-12:00", ["lundi"], 42]:
+        try:
+            encoder_semaine(mauvais)
+            raise AssertionError("aurait du lever pour %r" % (mauvais,))
+        except HoraireInvalide:
+            pass
+
+
+@suite.test("un jour ILLISIBLE est ferme, et ne fait PAS tomber la semaine")
+def _():
+    # La charge utile REELLE du front : il ecrivait le libelle traduit pour un
+    # jour ferme, pas null. Un seul de ces jours faisait rejeter tout l'horaire,
+    # et appliquer_timezone retombait alors sur le creneau par defaut — donc
+    # 24h/24. Un gerant qui posait une restriction obtenait une porte ouverte.
+    horaire = {"sunday": "Pas de timezone", "monday": "Pas de timezone",
+               "tuesday": "No Timezone", "wednesday": "09:15-23:58",
+               "thursday": "Pas de timezone", "friday": "n'importe quoi",
+               "saturday": "Pas de timezone"}
+    relu = decoder_semaine(encoder_semaine(horaire))
+    egal(relu["wednesday"], "09:15-23:58", "le jour lisible est conserve")
+    egal(relu["monday"], None, "un libelle traduit vaut ferme")
+    egal(relu["friday"], None, "toute valeur illisible vaut ferme")
+    verifier(encoder_semaine(horaire) != HORAIRE_24_7,
+             "et surtout : la semaine ne devient JAMAIS un 24/7 par accident")
+
+
+@suite.test("C3 : meme regle, un champ illisible ferme le jour")
+def _():
+    from services.c3_timezone import encoder_timezone
+    horaire = {"monday": "Pas de timezone", "wednesday": "09:15-23:58"}
+    champs = dict(c.split("=") for c in encoder_timezone(3, horaire).split("	"))
+    egal(champs["WedTime1"], "9152358", "mercredi encode")
+    egal(champs["MonTime1"], "0", "lundi ferme, sans faire echouer la ligne")
+
+
+@suite.test("slot_valide borne a 1..10 (10 combinaisons sur l'appareil)")
+def _():
+    egal(slot_valide(1), SLOT_DEFAUT, "le creneau 1 est le defaut")
+    egal(slot_valide("5"), 5, "une chaine numerique est acceptee")
+    egal(slot_valide(SLOT_MAX), 10, "le creneau 10 est le dernier utilisable")
+    for hors in [0, 11, -1, None, "", "abc"]:
+        egal(slot_valide(hors), None, "%r doit etre rejete" % (hors,))
+
+
+# ─── Encodage C3 (services/c3_timezone.py) ───────────────────────────────
+#
+# Le C3 code une plage sur UN entier : débutHHMM × 10000 + finHHMM, 0 = fermé.
+# Relevé en écriture/relecture sur le panneau 192.168.1.205 le 2026-08-25.
+
+from services.c3_timezone import (  # noqa: E402
+    encoder_intervalle, encoder_timezone,
+)
+
+
+@suite.test("C3 : une plage tient dans un entier debutHHMM*10000+finHHMM")
+def _():
+    egal(encoder_intervalle("06:00-12:00"), 6001200, "06:00-12:00")
+    egal(encoder_intervalle("07:30-11:00"), 7301100, "07:30-11:00")
+    # 00:00-23:59 donne 2359 : c'est la valeur d'usine du calendrier 1, ce qui
+    # confirme la formule sur une donnee qu'on n'a pas ecrite nous-memes.
+    egal(encoder_intervalle("00:00-23:59"), 2359, "le 24/7 doit valoir 2359")
+
+
+@suite.test("C3 : jour absent, vide ou None -> 0 (ferme)")
+def _():
+    for rien in (None, "", "   "):
+        egal(encoder_intervalle(rien), 0, "%r doit donner 0" % (rien,))
+
+
+@suite.test("C3 : les 21 champs de la semaine sont TOUS ecrits, zeros compris")
+def _():
+    # SetDeviceData met a jour champ par champ : un champ omis garde sa valeur
+    # precedente. Retrecir un horaire laisserait sinon l'ancien creneau ouvert.
+    champs = dict(c.split("=") for c in encoder_timezone(7, {"monday": "06:00-12:00"}).split("\t"))
+    egal(champs["TimezoneId"], "7", "l'identifiant de creneau")
+    egal(len(champs), 22, "TimezoneId + 7 jours x 3 intervalles")
+    egal(champs["MonTime1"], "6001200", "lundi")
+    egal(champs["TueTime1"], "0", "un jour non cite est ferme")
+    egal(champs["MonTime2"], "0", "les intervalles 2 et 3 sont remis a zero")
+    verifier(not any(c.startswith("Hol") for c in champs),
+             "les jours feries ne doivent pas etre ecrits : YoGym ne les gere pas")
+
+
+@suite.test("C3 : horaire malforme -> HoraireInvalide")
+def _():
+    for mauvais in ["06:00", "6h-12h", "25:00-26:00"]:
+        try:
+            encoder_intervalle(mauvais)
+            raise AssertionError("aurait du lever pour %r" % mauvais)
+        except HoraireInvalide:
+            pass
+
+
 if __name__ == "__main__":
     sys.exit(0 if suite.executer() else 1)
