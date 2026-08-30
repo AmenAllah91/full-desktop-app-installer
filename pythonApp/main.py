@@ -66,7 +66,7 @@ def initialize_env_file():
         default_env_content = """# .env
 
 # Racine de la plateforme : seule ligne à changer pour basculer d'environnement.
-YOGYM_BASE_URL=https://app.yogym.co
+YOGYM_BASE_URL=https://account.yo-club.app
 
 KAFKA_BROKER=51.178.55.238:9094
 KAFKA_GROUP_ID=group_c
@@ -2288,13 +2288,13 @@ if __name__ == '__main__':
     # Un installeur construit depuis un poste configuré sur l'intégration a
     # expédié les pointages d'un client vers le mauvais broker pendant plusieurs
     # jours sans que rien ne le signale : Electron affichait la production (il
-    # se replie sur app.yogym.co quand YOGYM_BASE_URL manque) pendant que le
+    # se replie sur account.yo-club.app quand YOGYM_BASE_URL manque) pendant que le
     # pont publiait sur l'intégration. Ces deux lignes rendent l'incohérence
     # visible au premier coup d'œil dans app.log.
     from config import YOGYM_BASE_URL as _base_url
     _broker = os.getenv("KAFKA_BROKER", "<absent>")
-    _env_nom = ("PRODUCTION" if "app.yogym.co" in (_base_url or "")
-                else "INTEGRATION" if "integration.yogym.co" in (_base_url or "")
+    _env_nom = ("PRODUCTION" if "account.yo-club.app" in (_base_url or "")
+                else "INTEGRATION" if "integration.yo-club.app" in (_base_url or "")
                 else "INCONNU")
     logging.info("🌐 Environnement : %s", _env_nom)
     logging.info("🌐 YOGYM_BASE_URL=%s | KAFKA_BROKER=%s | KAFKA_TOPIC=%s",

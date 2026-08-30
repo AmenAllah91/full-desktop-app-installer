@@ -22,12 +22,12 @@ ENV = Path(__file__).parent / "pythonApp" / ".env"
 CIBLES = {
     "int": {
         "nom": "INTEGRATION",
-        "YOGYM_BASE_URL": "https://integration.yogym.co",
+        "YOGYM_BASE_URL": "https://integration.yo-club.app",
         "KAFKA_BROKER": "54.38.35.221:9094",
     },
     "prod": {
         "nom": "PRODUCTION",
-        "YOGYM_BASE_URL": "https://app.yogym.co",
+        "YOGYM_BASE_URL": "https://account.yo-club.app",
         "KAFKA_BROKER": "51.178.55.238:9094",
     },
 }
@@ -60,7 +60,7 @@ def valeurs(texte):
 def environnement(vals):
     broker = vals.get("KAFKA_BROKER", "")
     url = vals.get("YOGYM_BASE_URL", "")
-    est_prod = "51.178.55.238" in broker, "app.yogym.co" in url
+    est_prod = "51.178.55.238" in broker, "account.yo-club.app" in url
     if all(est_prod):
         return "PRODUCTION"
     if not any(est_prod):

@@ -19,7 +19,7 @@ import time
 import json
 import socket
 
-BASE_REST = "https://integration.yogym.co/gym-management/public"
+BASE_REST = "https://integration.yo-club.app/gym-management/public"
 TENANT = "empire"
 BRANCHE = "1003"
 BROKER = "54.38.35.221:9094"

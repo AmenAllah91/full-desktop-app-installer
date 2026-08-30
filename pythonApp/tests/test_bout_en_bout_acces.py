@@ -42,7 +42,7 @@ from harnais import Suite, verifier, egal, ROUGE, VERT, JAUNE, GRAS, RAZ  # noqa
 
 BACK = os.environ.get("GYM_BASE_URL", "http://localhost:8081")
 PONT = "http://localhost:9998"
-KC = "https://login-int.yogym.co/realms/empire/protocol/openid-connect/token"
+KC = "https://login-int.yo-club.app/realms/empire/protocol/openid-connect/token"
 BROKER = os.environ.get("KAFKA_BROKER", "54.38.35.221:9094")
 TOPIC = "new_access_request_empire"
 

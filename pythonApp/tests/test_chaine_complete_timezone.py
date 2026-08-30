@@ -9,7 +9,7 @@ Conditions requises :
   - gym-management démarré en local sur :8081
       ./mvnw.cmd spring-boot:run -Dspring-boot.run.jvmArguments="-Dspring.devtools.restart.enabled=false"
   - le pont démarré sur la branche 1003 (dont la machine 2044 est la .230)
-      YOGYM_BASE_URL=https://integration.yogym.co python main.py empire 1003
+      YOGYM_BASE_URL=https://integration.yo-club.app python main.py empire 1003
   - la standalone 192.168.2.230 allumée
 
 Non destructif : la timezone créée est supprimée, et le créneau qu'elle a
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harnais import Suite, verifier, egal, ROUGE, VERT, GRAS, RAZ  # noqa: E402
 
 BACK = os.environ.get("GYM_BASE_URL", "http://localhost:8081")
-KC = "https://login-int.yogym.co/realms/empire/protocol/openid-connect/token"
+KC = "https://login-int.yo-club.app/realms/empire/protocol/openid-connect/token"
 IP_MACHINE = "192.168.2.230"
 PORT = 4370
 COMKEY = 123456

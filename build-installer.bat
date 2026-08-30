@@ -30,11 +30,11 @@ if "%TARGET%"=="" set TARGET=prod
 
 if /i "%TARGET%"=="prod" (
     set TARGET_LABEL=PRODUCTION
-    set ENV_BASE_URL=https://app.yogym.co
+    set ENV_BASE_URL=https://account.yo-club.app
     set ENV_KAFKA_BROKER=51.178.55.238:9094
 ) else if /i "%TARGET%"=="int" (
     set TARGET_LABEL=INTEGRATION - tests internes
-    set ENV_BASE_URL=https://integration.yogym.co
+    set ENV_BASE_URL=https://integration.yo-club.app
     set ENV_KAFKA_BROKER=54.38.35.221:9094
 ) else (
     echo ❌ Cible inconnue : "%TARGET%"

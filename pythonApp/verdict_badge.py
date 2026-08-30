@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 BACK = os.environ.get("GYM_BASE_URL", "http://localhost:8081")
-KC = "https://login-int.yogym.co/realms/empire/protocol/openid-connect/token"
+KC = "https://login-int.yo-club.app/realms/empire/protocol/openid-connect/token"
 IP = os.environ.get("IP_POINTEUSE", "192.168.2.230")
 COMKEY = 123456
 JOURS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]

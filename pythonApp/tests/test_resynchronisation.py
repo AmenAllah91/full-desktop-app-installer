@@ -37,7 +37,7 @@ from harnais import Suite, verifier, egal  # noqa: E402
 
 BACK = os.environ.get("GYM_BASE_URL", "http://localhost:8081")
 PONT = "http://localhost:9998"
-KC = "https://login-int.yogym.co/realms/empire/protocol/openid-connect/token"
+KC = "https://login-int.yo-club.app/realms/empire/protocol/openid-connect/token"
 IP = os.environ.get("IP_POINTEUSE", "192.168.2.230")
 COMKEY = 123456
 DB = os.path.join(os.environ.get("APPDATA", ""), "desktop-app", "task_queue.db")

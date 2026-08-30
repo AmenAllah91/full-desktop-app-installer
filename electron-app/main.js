@@ -34,7 +34,7 @@ const CRASH_WINDOW_MS = 10 * 60 * 1000;
 const CRASH_LIMIT = 10;
 
 // Repli si le .env est absent ou muet — voir readBaseUrl().
-const DEFAULT_BASE_URL = 'https://app.yogym.co';
+const DEFAULT_BASE_URL = 'https://account.yo-club.app';
 
 let mainWindow = null;
 let bridge = null;
@@ -75,7 +75,7 @@ function setBridgeState(state, detail = '') {
 
 // Racine de la plateforme, lue dans le MÊME .env que le pont Python. L'URL était
 // codée en dur ici, alors que Python avait ses propres valeurs par défaut
-// dispersées : basculer le poste vers integration.yogym.co demandait d'éditer
+// dispersées : basculer le poste vers integration.yo-club.app demandait d'éditer
 // quatre endroits dans trois langages. Une seule ligne suffit désormais.
 function resolveEnvFile() {
     const candidates = [
