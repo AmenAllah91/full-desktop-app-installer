@@ -2,7 +2,7 @@
 
 Conditions requises :
   - pythonApp en local sur http://localhost:9998
-  - standalone 192.168.2.12 (comKey 123456) connectée
+  - standalone 192.168.2.230 (comKey 123456) connectée
   - C3         192.168.1.205 connectée
 
 Si une condition manque, le script s'arrête AVANT tout test en nommant
@@ -27,7 +27,7 @@ BASE = "http://localhost:9998"
 TIMEOUT = 20
 
 MACHINES_ATTENDUES = {
-    "192.168.2.12": "standalone (comKey 123456)",
+    "192.168.2.230": "standalone (comKey 123456)",
     "192.168.1.205": "C3",
 }
 

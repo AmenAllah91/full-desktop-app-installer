@@ -1,0 +1,13 @@
+{
+  "id": 2,
+  "name": "Night timezone",
+  "description": "Night timezone",
+  "slot": 3,
+  "sunday": "15:00-16:00",
+  "monday": "13:00-17:00",
+  "tuesday": "13:00-17:00",
+  "wednesday": "13:32-17:00",
+  "thursday": "13:00-18:00",
+  "friday": "13:00-14:00",
+  "saturday": "13:00-17:00"
+}

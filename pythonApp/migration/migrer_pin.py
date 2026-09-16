@@ -319,7 +319,7 @@ def main():
         if fiche is None:
             sortir(1, f"{ROUGE}Le PIN {ancien} n'existe pas sur ce panneau.{RAZ}")
 
-        # La cible existe presque toujours : c'est la fiche que YoGym a poussee
+        # La cible existe presque toujours : c'est la fiche que Yo-Club a poussee
         # en donnant l'acces a l'employe. Elle est vide d'empreintes, et c'est
         # justement ce qu'on vient completer. Refuser ce cas reviendrait a
         # refuser le scenario nominal.
@@ -374,12 +374,12 @@ def main():
 
         print()
         if fusion:
-            # Les DATES de la cible viennent de YoGym et font autorite : c'est
+            # Les DATES de la cible viennent de Yo-Club et font autorite : c'est
             # la periode d'acces reelle de l'employe, on n'y touche pas.
             #
             # La CARTE, elle, est ecrasee par celle de l'ancienne fiche : c'est
             # le badge que la personne a physiquement en poche. Garder celle de
-            # YoGym la laisserait devant une porte qui ne la reconnait plus.
+            # Yo-Club la laisserait devant une porte qui ne la reconnait plus.
             carte_ancienne = (fiche.get("CardNo") or "").strip()
             carte_cible = (fiche_cible.get("CardNo") or "").strip()
 
@@ -388,7 +388,7 @@ def main():
                 # Verifie sur le banc le 2026-08-22 : une ecriture partielle ne
                 # met pas a jour les champs fournis, elle REMPLACE la fiche —
                 # StartTime et EndTime sont retombes a 0, detruisant la periode
-                # de validite venue de YoGym. On repart donc des champs de la
+                # de validite venue de Yo-Club. On repart donc des champs de la
                 # cible, avec la seule carte substituee.
                 fusionnee = dict(fiche_cible)
                 fusionnee["CardNo"] = carte_ancienne

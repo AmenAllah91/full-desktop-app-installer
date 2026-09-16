@@ -621,7 +621,7 @@ def _():
     egal(champs["TueTime1"], "0", "un jour non cite est ferme")
     egal(champs["MonTime2"], "0", "les intervalles 2 et 3 sont remis a zero")
     verifier(not any(c.startswith("Hol") for c in champs),
-             "les jours feries ne doivent pas etre ecrits : YoGym ne les gere pas")
+             "les jours feries ne doivent pas etre ecrits : Yo-Club ne les gere pas")
 
 
 @suite.test("C3 : horaire malforme -> HoraireInvalide")

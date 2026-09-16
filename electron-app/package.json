@@ -1,5 +1,5 @@
 {
-  "name": "YoGym",
+  "name": "yo-club",
   "version": "1.0.0",
   "description": "A desktop application for managing biometric machines",
   "main": "main.js",
@@ -22,19 +22,19 @@
   },
   "build": {
     "appId": "com.biometric.machinemanager",
-    "productName": "YoGym",
+    "productName": "Yo-Club",
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": "nsis",
-      "icon": "./resources/yogymlogo.ico"
+      "icon": "./resources/yo-club-logo.ico"
     },
     "nsis": {
-      "installerIcon": "./resources/yogymlogo.ico",
-      "uninstallerIcon": "./resources/yogymlogo.ico",
-      "installerHeaderIcon": "./resources/yogymlogo.ico",
-      "uninstallDisplayName": "YoGym"
+      "installerIcon": "./resources/yo-club-logo.ico",
+      "uninstallerIcon": "./resources/yo-club-logo.ico",
+      "installerHeaderIcon": "./resources/yo-club-logo.ico",
+      "uninstallDisplayName": "Yo-Club"
     },
     "files": [
       "main.js",

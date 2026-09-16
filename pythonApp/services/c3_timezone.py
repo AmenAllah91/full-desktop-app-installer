@@ -21,7 +21,7 @@ Mesures du 2026-08-25 sur le C3 192.168.1.205 (ACP-260) :
     pont en production ca tue le service sans une ligne de journal. Ne jamais
     construire un nom de table dynamiquement ;
   - colonnes : `TimezoneId`, puis `<Jour>Time1..3` pour Sun..Sat, puis
-    `Hol1..3Time1..3` -- ces dernieres laissees telles quelles, YoGym ne gere
+    `Hol1..3Time1..3` -- ces dernieres laissees telles quelles, Yo-Club ne gere
     pas les jours feries ;
   - chaque champ est un ENTIER `debutHHMM * 10000 + finHHMM`, `0` = ferme.
     Verifie en ecriture/relecture : `MonTime1=6001200` se relit `6001200` et
@@ -96,7 +96,7 @@ def encoder_timezone(slot, horaire):
         champs.append("%sTime2=0" % prefixe)
         champs.append("%sTime3=0" % prefixe)
 
-    # Les colonnes Hol1..3Time1..3 ne sont pas ecrites : YoGym ne gere pas les
+    # Les colonnes Hol1..3Time1..3 ne sont pas ecrites : Yo-Club ne gere pas les
     # jours feries, et la table `holiday` du panneau est vide. Rien a piloter.
     return "\t".join(champs)
 

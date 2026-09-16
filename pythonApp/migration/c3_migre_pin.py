@@ -1,7 +1,7 @@
 """MIGRATION d'un PIN vers un autre sur un C3, empreintes comprises.
 
 Second des deux scripts vikings. L'ancienne solution place les employes a partir
-de 40000, la notre a partir de 100000 : une fois l'employe cree dans YoGym, on
+de 40000, la notre a partir de 100000 : une fois l'employe cree dans Yo-Club, on
 deplace sa fiche machine vers son nouveau PIN sans lui faire refaire ses
 empreintes.
 
@@ -35,7 +35,7 @@ from datetime import datetime
 IP = "192.168.1.205"
 PORT = 4370
 
-# Ancien PIN -> nouveau PIN. Le nouveau est celui que YoGym a attribue.
+# Ancien PIN -> nouveau PIN. Le nouveau est celui que Yo-Club a attribue.
 MIGRATIONS = {
     3058: 100050,      # test banc : 3 empreintes dont le doigt 0
 }

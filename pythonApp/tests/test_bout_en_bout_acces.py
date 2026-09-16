@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RACINE)
@@ -369,7 +370,14 @@ def controle_prealable(machines_directes=False):
     manquants = []
     print("%sControle prealable%s" % (GRAS, RAZ))
     print("-" * 76)
-    for (h, p), quoi in ((("localhost", 8081), "gym-management"),
+    # BACK est parametrable par GYM_BASE_URL, mais ce controle visait
+    # "localhost:8081" en dur : viser un back distant (l'integration) faisait
+    # echouer la condition alors que le service repondait parfaitement.
+    _u = urlparse(BACK)
+    _hote = _u.hostname or "localhost"
+    _port = _u.port or (443 if _u.scheme == "https" else 80)
+
+    for (h, p), quoi in (((_hote, _port), "gym-management (%s)" % BACK),
                          ((STANDALONE["ip"], 4370), "standalone " + STANDALONE["ip"]),
                          ((C3["ip"], 4370), "C3 " + C3["ip"])):
         if joignable(h, p):

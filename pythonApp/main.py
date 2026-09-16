@@ -66,7 +66,7 @@ def initialize_env_file():
         default_env_content = """# .env
 
 # Racine de la plateforme : seule ligne à changer pour basculer d'environnement.
-YOGYM_BASE_URL=https://account.yo-club.app
+YOCLUB_BASE_URL=https://account.yo-club.app
 
 KAFKA_BROKER=51.178.55.238:9094
 KAFKA_GROUP_ID=group_c
@@ -78,9 +78,60 @@ FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
 """
-        with open(ENV_FILE_PATH, 'w') as f:
+        # encoding='utf-8' EXPLICITE : sans lui, open() emploie la page de code
+        # du systeme — cp1252 sur un Windows francais. Le « à » du commentaire
+        # ci-dessus partait alors en octet 0xe0, que load_dotenv relisait en
+        # UTF-8 au demarrage SUIVANT : UnicodeDecodeError, et l'application ne
+        # redemarrait plus jamais. Constate chez spartaclub le 2026-08-22, sur
+        # un poste neuf.
+        with open(ENV_FILE_PATH, 'w', encoding='utf-8') as f:
             f.write(default_env_content)
         logging.info("Created default .env file at: %s", ENV_FILE_PATH)
+
+
+def charger_env_tolerant():
+    """Charge le .env, et REPARE le fichier s'il n'est pas en UTF-8.
+
+    Un poste deja abime par l'ancienne ecriture cp1252 doit pouvoir redemarrer :
+    corriger l'ecriture ne suffit pas, le mauvais fichier est deja sur le disque
+    et rien ne le reecrit — initialize_env_file ne touche a rien quand le
+    fichier existe.
+
+    On relit donc en cp1252, puis on reecrit en UTF-8 : la reparation est
+    definitive, l'incident ne se represente pas au lancement suivant.
+    """
+    if not os.path.exists(ENV_FILE_PATH):
+        return
+
+    try:
+        load_dotenv(dotenv_path=ENV_FILE_PATH, encoding='utf-8')
+        return
+    except UnicodeDecodeError as exc:
+        logging.warning("⚠️ .env illisible en UTF-8 (%s) — tentative de reparation", exc)
+
+    contenu = None
+    for repli in ('cp1252', 'latin-1'):
+        try:
+            with open(ENV_FILE_PATH, 'r', encoding=repli) as f:
+                contenu = f.read()
+            break
+        except (UnicodeDecodeError, OSError):
+            continue
+
+    if contenu is None:
+        logging.error("❌ .env illisible dans tous les encodages essayes : %s. "
+                      "Renommez-le, l'application en recreera un.", ENV_FILE_PATH)
+        return
+
+    try:
+        with open(ENV_FILE_PATH, 'w', encoding='utf-8') as f:
+            f.write(contenu)
+        logging.warning("✅ .env reecrit en UTF-8 (il etait en %s)", repli)
+    except OSError as exc:
+        logging.error("❌ Reecriture du .env impossible (%s) — on continue "
+                      "avec les valeurs relues en memoire.", exc)
+
+    load_dotenv(dotenv_path=ENV_FILE_PATH, encoding='utf-8', override=True)
 
 
 # Get paths for data files
@@ -92,8 +143,10 @@ TEMP_DIR = os.path.join(APP_DATA_DIR, 'temp')
 # Create temp directory for photos
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Load environment variables from AppData
-load_dotenv(dotenv_path=ENV_FILE_PATH)
+# Load environment variables from AppData.
+# Passe par charger_env_tolerant : un .env ecrit en cp1252 par une version
+# anterieure ferait echouer load_dotenv, et l'application ne demarrerait plus.
+charger_env_tolerant()
 initialize_env_file()
 
 KafkaBroker = os.getenv("KAFKA_BROKER")
@@ -163,7 +216,7 @@ def _resolve_identity() -> tuple[str, str]:
         msg = (
             "DEMARRAGE REFUSE : " + " et ".join(manquants) + " non fourni(s). "
             "Usage : pythonApp.exe <tenant> <gymBranchId>. "
-            "Ces deux valeurs sont saisies a la premiere ouverture de YoGym et "
+            "Ces deux valeurs sont saisies a la premiere ouverture de Yo-Club et "
             "conservees dans config.json. Aucune valeur par defaut n'est "
             "appliquee : un repli ferait tourner ce poste sous l'identite d'un "
             "autre club."
@@ -371,7 +424,7 @@ def fetch_machines_with_retry(tenant: str, gym_branch_id: str,
     """
     Récupère la liste des machines en insistant tant que le réseau n'est pas prêt.
 
-    Un PC qui démarre lance YoGym avant que le DNS ne réponde : get_access_machines
+    Un PC qui démarre lance Yo-Club avant que le DNS ne réponde : get_access_machines
     levait alors une exception, le `try` de __main__ la relançait, et le pont
     mourait sans que personne ne le redémarre.
 
@@ -2288,20 +2341,20 @@ if __name__ == '__main__':
     # Un installeur construit depuis un poste configuré sur l'intégration a
     # expédié les pointages d'un client vers le mauvais broker pendant plusieurs
     # jours sans que rien ne le signale : Electron affichait la production (il
-    # se replie sur account.yo-club.app quand YOGYM_BASE_URL manque) pendant que le
+    # se replie sur account.yo-club.app quand YOCLUB_BASE_URL manque) pendant que le
     # pont publiait sur l'intégration. Ces deux lignes rendent l'incohérence
     # visible au premier coup d'œil dans app.log.
-    from config import YOGYM_BASE_URL as _base_url
+    from config import YOCLUB_BASE_URL as _base_url
     _broker = os.getenv("KAFKA_BROKER", "<absent>")
     _env_nom = ("PRODUCTION" if "account.yo-club.app" in (_base_url or "")
                 else "INTEGRATION" if "integration.yo-club.app" in (_base_url or "")
                 else "INCONNU")
     logging.info("🌐 Environnement : %s", _env_nom)
-    logging.info("🌐 YOGYM_BASE_URL=%s | KAFKA_BROKER=%s | KAFKA_TOPIC=%s",
+    logging.info("🌐 YOCLUB_BASE_URL=%s | KAFKA_BROKER=%s | KAFKA_TOPIC=%s",
                  _base_url, _broker, os.getenv("KAFKA_TOPIC", "rt_pointage"))
     if _env_nom == "INCONNU":
-        logging.warning("⚠️ YOGYM_BASE_URL ne correspond à aucun environnement connu — "
-                        "vérifier le .env livré à côté de YoGym.exe")
+        logging.warning("⚠️ YOCLUB_BASE_URL ne correspond à aucun environnement connu — "
+                        "vérifier le .env livré à côté de Yo-Club.exe")
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     start_ws_server()

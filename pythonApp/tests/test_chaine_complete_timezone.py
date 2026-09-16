@@ -9,7 +9,7 @@ Conditions requises :
   - gym-management démarré en local sur :8081
       ./mvnw.cmd spring-boot:run -Dspring-boot.run.jvmArguments="-Dspring.devtools.restart.enabled=false"
   - le pont démarré sur la branche 1003 (dont la machine 2044 est la .230)
-      YOGYM_BASE_URL=https://integration.yo-club.app python main.py empire 1003
+      YOCLUB_BASE_URL=https://integration.yo-club.app python main.py empire 1003
   - la standalone 192.168.2.230 allumée
 
 Non destructif : la timezone créée est supprimée, et le créneau qu'elle a

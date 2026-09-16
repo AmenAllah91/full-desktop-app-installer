@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Fichier projet reconstitue le 2026-08-30 a partir des artefacts livres
+    (ConsoleApp1.deps.json, ConsoleApp1.runtimeconfig.json) : le binaire etait
+    versionne sans son .csproj, donc non reconstructible en l'etat.
+
+    Publier avec :
+
+        dotnet publish -c Release
+
+    (le RuntimeIdentifier, le self-contained et le single-file sont fixes
+    ci-dessous, pour qu'une publication a la main ne puisse pas les oublier)
+
+    SelfContained : le binaire livre jusqu'ici etait framework-dependent
+    (138 Ko) et exigeait le runtime .NET 8 x64 sur CHAQUE poste client. Ni
+    l'installeur NSIS ni setupDlls.py ne l'installent : absent, l'exe sort en
+    2147516547 (0x80008083) et la recuperation des photos de visage echoue en
+    silence. Self-contained supprime ce prerequis.
+
+    PublishSingleFile : NON negociable ici. build-installer.bat copie ce dossier
+    avec `copy /y "...\getuserfacephoto\*"`, qui est PLAT et NON RECURSIF. Une
+    publication self-contained ordinaire eclate le runtime en sous-dossiers, que
+    ce copy laisserait silencieusement derriere lui : l'installeur partirait avec
+    un utilitaire incomplet. Un fichier unique preserve la forme actuelle du
+    dossier.
+
+    PublishTrimmed reste a false : le trimming supprime le code atteint par
+    reflexion seulement, ce dont l'interop COM depend. Gagner quelques dizaines
+    de Mo ne vaut pas un GetUserFacePhotoByName qui casse chez un client.
+
+    DebugType=none : sans lui, le chemin de compilation du poste de build est
+    grave dans le binaire (l'ancien portait encore
+    "...\full-desktop-yogym\..." apres le renommage de la marque).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>ConsoleApp1</AssemblyName>
+    <RootNamespace>ConsoleApp1</RootNamespace>
+
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- Reprend a l'identique les configProperties du runtimeconfig livre. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- La source est ecrite en style pre-C#10 : usings explicites, pas
+         d'annotations de nullabilite. Activer l'un ou l'autre la ferait
+         echouer ou la couvrirait d'avertissements. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Seul fichier source du projet. -->
+    <Compile Remove="**\*.cs" />
+    <Compile Include="GetFacePhotoFromDevice.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Assembly d'interop COM du SDK ZKTeco, livree a cote du binaire. Elle
+         n'est pas regeneree au build : c'est un fichier versionne. -->
+    <Reference Include="Interop.zkemkeeper">
+      <HintPath>Interop.zkemkeeper.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+</Project>

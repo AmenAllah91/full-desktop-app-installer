@@ -5,7 +5,7 @@ Bascule le pont Python entre INTEGRATION et PRODUCTION.
     python bascule.py int      -> bascule sur l'integration
     python bascule.py prod     -> bascule sur la PRODUCTION
 
-Ne modifie que les deux lignes YOGYM_BASE_URL et KAFKA_BROKER. Tout le reste du
+Ne modifie que les deux lignes YOCLUB_BASE_URL et KAFKA_BROKER. Tout le reste du
 fichier — commentaires, lignes vides, ordre, encodage — est preserve a l'octet
 pres.
 
@@ -22,17 +22,22 @@ ENV = Path(__file__).parent / "pythonApp" / ".env"
 CIBLES = {
     "int": {
         "nom": "INTEGRATION",
-        "YOGYM_BASE_URL": "https://integration.yo-club.app",
+        "YOCLUB_BASE_URL": "https://integration.yo-club.app",
         "KAFKA_BROKER": "54.38.35.221:9094",
     },
     "prod": {
         "nom": "PRODUCTION",
-        "YOGYM_BASE_URL": "https://account.yo-club.app",
+        "YOCLUB_BASE_URL": "https://account.yo-club.app",
         "KAFKA_BROKER": "51.178.55.238:9094",
     },
 }
 
-CLES = ("YOGYM_BASE_URL", "KAFKA_BROKER")
+CLE_URL = "YOCLUB_BASE_URL"
+# Ancien nom de la cle, d'avant le renommage de la marque. Un poste installe avant
+# la bascule garde son .env : on doit savoir le lire, et le reecrire sous le
+# nouveau nom plutot que d'ajouter une deuxieme ligne concurrente.
+CLE_URL_LEGACY = "YOGYM_BASE_URL"
+CLES = (CLE_URL, "KAFKA_BROKER")
 
 
 def lire():
@@ -52,14 +57,19 @@ def valeurs(texte):
         if nue.startswith("#") or "=" not in nue:
             continue
         cle, _, val = nue.partition("=")
-        if cle.strip() in CLES:
-            trouve[cle.strip()] = val.strip()
+        cle = cle.strip()
+        if cle == CLE_URL_LEGACY:
+            # Normalise sous le nom courant : le reste du script n'a pas a
+            # connaitre les deux orthographes.
+            trouve.setdefault(CLE_URL, val.strip())
+        elif cle in CLES:
+            trouve[cle] = val.strip()
     return trouve
 
 
 def environnement(vals):
     broker = vals.get("KAFKA_BROKER", "")
-    url = vals.get("YOGYM_BASE_URL", "")
+    url = vals.get(CLE_URL, "")
     est_prod = "51.178.55.238" in broker, "account.yo-club.app" in url
     if all(est_prod):
         return "PRODUCTION"
@@ -98,7 +108,10 @@ def basculer(texte, cible):
         if nue.startswith("#"):
             continue
         for cle in CLES:
-            if nue.startswith(cle + "="):
+            # Une ligne encore ecrite sous l'ancien nom est reecrite sous le
+            # nouveau : la bascule migre la cle au passage, une seule fois.
+            noms = (cle, CLE_URL_LEGACY) if cle == CLE_URL else (cle,)
+            if any(nue.startswith(nom + "=") for nom in noms):
                 fin = ligne[len(ligne.rstrip("\r\n")):]     # \r\n ou \n d'origine
                 lignes[i] = f"{cle}={conf[cle]}{fin}"
                 vues.add(cle)

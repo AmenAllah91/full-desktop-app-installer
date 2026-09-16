@@ -1,0 +1,3530 @@
+{
+  "ip": "192.168.1.205",
+  "port": 4370,
+  "pinMin": 0,
+  "pinMax": 999999,
+  "date": "2026-08-22T08:53:36",
+  "totalFichesPanneau": 168,
+  "utilisateurs": [
+    {
+      "pin": 2,
+      "uid": 2,
+      "cardNo": "14616607",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241101",
+      "endTime": "20241201",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3,
+      "uid": 3,
+      "cardNo": "2329328",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241014",
+      "endTime": "20250114",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 4,
+      "uid": 4,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230618",
+      "endTime": "20240618",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 6,
+      "uid": 6,
+      "cardNo": "1323830",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241004",
+      "endTime": "20250104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 7,
+      "uid": 7,
+      "cardNo": "4333896",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20230101",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 8,
+      "uid": 8,
+      "cardNo": "2950881",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241001",
+      "endTime": "20241201",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 9,
+      "uid": 9,
+      "cardNo": "3898180",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20240901",
+      "endTime": "20250601",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 10,
+      "uid": 10,
+      "cardNo": "13088851",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20240911",
+      "endTime": "20251011",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 11,
+      "uid": 11,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 12,
+      "uid": 12,
+      "cardNo": "2950877",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241001",
+      "endTime": "20241201",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        },
+        {
+          "timezoneId": "2",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 13,
+      "uid": 13,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230620",
+      "endTime": "20230720",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 14,
+      "uid": 14,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 15,
+      "uid": 15,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230620",
+      "endTime": "20240620",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 16,
+      "uid": 16,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230721",
+      "endTime": "20230821",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 17,
+      "uid": 17,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230726",
+      "endTime": "20230826",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 18,
+      "uid": 18,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230621",
+      "endTime": "20230721",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 19,
+      "uid": 19,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230621",
+      "endTime": "20230721",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 20,
+      "uid": 20,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 21,
+      "uid": 21,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 22,
+      "uid": 22,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 23,
+      "uid": 23,
+      "cardNo": "14377468",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20230101",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 24,
+      "uid": 24,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 25,
+      "uid": 25,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 26,
+      "uid": 26,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 27,
+      "uid": 27,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230622",
+      "endTime": "20230722",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 28,
+      "uid": 28,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230623",
+      "endTime": "20230723",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 29,
+      "uid": 29,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230623",
+      "endTime": "20230723",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 30,
+      "uid": 30,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230624",
+      "endTime": "20230724",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 31,
+      "uid": 31,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230626",
+      "endTime": "20230726",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 32,
+      "uid": 32,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230727",
+      "endTime": "20230827",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 33,
+      "uid": 33,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230802",
+      "endTime": "20230902",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 34,
+      "uid": 34,
+      "cardNo": "13047521",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241101",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 35,
+      "uid": 35,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230701",
+      "endTime": "20230801",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 36,
+      "uid": 36,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230801",
+      "endTime": "20230901",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 37,
+      "uid": 37,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 38,
+      "uid": 38,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 39,
+      "uid": 39,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 40,
+      "uid": 40,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230801",
+      "endTime": "20230901",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 41,
+      "uid": 41,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 42,
+      "uid": 42,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 43,
+      "uid": 43,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 44,
+      "uid": 44,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230918",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 45,
+      "uid": 45,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230918",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 46,
+      "uid": 46,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 47,
+      "uid": 47,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230619",
+      "endTime": "20230719",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 48,
+      "uid": 48,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20230803",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 49,
+      "uid": 49,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230703",
+      "endTime": "20240703",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 50,
+      "uid": 50,
+      "cardNo": "10185008",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241002",
+      "endTime": "20250102",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 51,
+      "uid": 51,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230704",
+      "endTime": "20230804",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 52,
+      "uid": 52,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230704",
+      "endTime": "20230804",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 53,
+      "uid": 53,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230704",
+      "endTime": "20230804",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 54,
+      "uid": 54,
+      "cardNo": "14457832",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20230101",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 55,
+      "uid": 55,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230704",
+      "endTime": "20230804",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 56,
+      "uid": 56,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 57,
+      "uid": 57,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 58,
+      "uid": 58,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 59,
+      "uid": 59,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 60,
+      "uid": 60,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 61,
+      "uid": 61,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230705",
+      "endTime": "20230805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 62,
+      "uid": 62,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230706",
+      "endTime": "20230806",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 63,
+      "uid": 63,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230706",
+      "endTime": "20230806",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 64,
+      "uid": 64,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230706",
+      "endTime": "20230906",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 65,
+      "uid": 65,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230710",
+      "endTime": "20230910",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 66,
+      "uid": 66,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230710",
+      "endTime": "20230810",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 67,
+      "uid": 67,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230621",
+      "endTime": "20230721",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 68,
+      "uid": 68,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230711",
+      "endTime": "20230811",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 69,
+      "uid": 69,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230711",
+      "endTime": "20230911",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 70,
+      "uid": 70,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230717",
+      "endTime": "20230817",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 71,
+      "uid": 71,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230717",
+      "endTime": "20230817",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 72,
+      "uid": 72,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230718",
+      "endTime": "20230818",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 73,
+      "uid": 73,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230718",
+      "endTime": "20230818",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 74,
+      "uid": 74,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230718",
+      "endTime": "20230818",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 75,
+      "uid": 75,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230721",
+      "endTime": "20230821",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 76,
+      "uid": 76,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230721",
+      "endTime": "20230821",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 77,
+      "uid": 77,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230726",
+      "endTime": "20230826",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 78,
+      "uid": 78,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230727",
+      "endTime": "20230827",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 80,
+      "uid": 79,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230731",
+      "endTime": "20230831",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 81,
+      "uid": 80,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230731",
+      "endTime": "20230831",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 82,
+      "uid": 81,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230731",
+      "endTime": "20230831",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 83,
+      "uid": 82,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230731",
+      "endTime": "20230831",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 84,
+      "uid": 83,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230801",
+      "endTime": "20230901",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 85,
+      "uid": 84,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230801",
+      "endTime": "20230901",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 86,
+      "uid": 85,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230810",
+      "endTime": "20230921",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 87,
+      "uid": 86,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230803",
+      "endTime": "20230903",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 88,
+      "uid": 87,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230803",
+      "endTime": "20230903",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 89,
+      "uid": 88,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230805",
+      "endTime": "20230905",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 90,
+      "uid": 89,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230805",
+      "endTime": "20230905",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 91,
+      "uid": 90,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230807",
+      "endTime": "20230907",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 92,
+      "uid": 91,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230807",
+      "endTime": "20230907",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 93,
+      "uid": 92,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230807",
+      "endTime": "20230907",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 94,
+      "uid": 93,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230808",
+      "endTime": "20230908",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 95,
+      "uid": 94,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230809",
+      "endTime": "20230909",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 96,
+      "uid": 95,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230809",
+      "endTime": "20230909",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 97,
+      "uid": 96,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230810",
+      "endTime": "20230910",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 98,
+      "uid": 97,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230811",
+      "endTime": "20230911",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 99,
+      "uid": 98,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230812",
+      "endTime": "20230912",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 100,
+      "uid": 99,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230814",
+      "endTime": "20230914",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 102,
+      "uid": 101,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230816",
+      "endTime": "20230916",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 103,
+      "uid": 102,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230816",
+      "endTime": "20230916",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 104,
+      "uid": 103,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230817",
+      "endTime": "20230917",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 106,
+      "uid": 104,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230819",
+      "endTime": "20230921",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 108,
+      "uid": 106,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230821",
+      "endTime": "20230921",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 110,
+      "uid": 109,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230823",
+      "endTime": "20230923",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 113,
+      "uid": 112,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230823",
+      "endTime": "20230923",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 114,
+      "uid": 113,
+      "cardNo": "0",
+      "name": "",
+      "password": "0",
+      "group": "0",
+      "startTime": "20230824",
+      "endTime": "20230924",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 215,
+      "uid": 116,
+      "cardNo": "2142721",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "3"
+        }
+      ]
+    },
+    {
+      "pin": 285,
+      "uid": 127,
+      "cardNo": "7021952",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241001",
+      "endTime": "20241201",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 593,
+      "uid": 187,
+      "cardNo": "9076078",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260702",
+      "endTime": "20260801",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 1173,
+      "uid": 120,
+      "cardNo": "14152734",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260820",
+      "endTime": "20260901",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 1227,
+      "uid": 139,
+      "cardNo": "14934002",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20240911",
+      "endTime": "20250111",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 1704,
+      "uid": 188,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260706",
+      "endTime": "20260805",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 1717,
+      "uid": 1,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 1872,
+      "uid": 121,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 2947,
+      "uid": 129,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 2963,
+      "uid": 146,
+      "cardNo": "2326441",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251101",
+      "endTime": "20251130",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 2980,
+      "uid": 134,
+      "cardNo": "4344445",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241201",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 2983,
+      "uid": 149,
+      "cardNo": "14658885",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251101",
+      "endTime": "20251130",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 2997,
+      "uid": 169,
+      "cardNo": "4893929",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251002",
+      "endTime": "20251101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 2998,
+      "uid": 165,
+      "cardNo": "4855045",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250907",
+      "endTime": "20251101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3002,
+      "uid": 100,
+      "cardNo": "1228432",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260819",
+      "endTime": "20260828",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 3003,
+      "uid": 164,
+      "cardNo": "10471248",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250902",
+      "endTime": "20251001",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3005,
+      "uid": 142,
+      "cardNo": "4914752",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250401",
+      "endTime": "20250501",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3007,
+      "uid": 166,
+      "cardNo": "1197324",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250916",
+      "endTime": "20251015",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3011,
+      "uid": 144,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3014,
+      "uid": 141,
+      "cardNo": "14934002",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20240911",
+      "endTime": "20251011",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 3016,
+      "uid": 140,
+      "cardNo": "7285820",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250401",
+      "endTime": "20250501",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3018,
+      "uid": 143,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3019,
+      "uid": 137,
+      "cardNo": "4844220",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241204",
+      "endTime": "20250104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3023,
+      "uid": 136,
+      "cardNo": "4841687",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241204",
+      "endTime": "20250104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 3024,
+      "uid": 135,
+      "cardNo": "12154513",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241204",
+      "endTime": "20250104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3025,
+      "uid": 119,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3027,
+      "uid": 126,
+      "cardNo": "9476740",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241104",
+      "endTime": "20250104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3028,
+      "uid": 122,
+      "cardNo": "10460966",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250501",
+      "endTime": "20250601",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3030,
+      "uid": 125,
+      "cardNo": "3898180",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241101",
+      "endTime": "20241201",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3031,
+      "uid": 131,
+      "cardNo": "4625565",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250904",
+      "endTime": "20251104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3032,
+      "uid": 132,
+      "cardNo": "14934002",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241120",
+      "endTime": "20241220",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 3033,
+      "uid": 145,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 3034,
+      "uid": 147,
+      "cardNo": "6139909",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260817",
+      "endTime": "20260916",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3035,
+      "uid": 154,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3036,
+      "uid": 167,
+      "cardNo": "96578522",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250901",
+      "endTime": "20250930",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3038,
+      "uid": 163,
+      "cardNo": "5555555",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250920",
+      "endTime": "20251019",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3040,
+      "uid": 190,
+      "cardNo": "12587302",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260817",
+      "endTime": "20260916",
+      "superAuthorize": "0",
+      "empreintes": [
+        {
+          "fingerId": 1,
+          "valid": "1",
+          "size": 2048,
+          "template": "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"
+        },
+        {
+          "fingerId": 7,
+          "valid": "1",
+          "size": 1278,
+          "template": "TbtTUzIxAAAE+PsECAUHCc7QAAAo+XYBAABkhCUtWfjJAMJkhwBtAECcWgD3ADdkTQCe+EdkjgCMALJkh/gSAS9kJwByAMCcVQAjATRkeQCK+KVkVgA9Ae9ktfg8AaZFxADxAaLWMABSAFBkRQBZ+ZwWawBjAVUnjPjhADRkkgBoADGcjgCiAB5kqgCL+OtkMwCvAAxkQviOAEhkLQA8AEycdABsAAFk8QB6+M5kiQA8AWleifhLABFklQCIAaLIxwBdAJ9MfABJ+ZsugwAzALtkUPi/AD5klQAgACmcPwDBAERklgAH+TpkkgANAe5kQ/gIAUVkKQBmAECckQBxAH5kjQAy+VZkcQBIAWNjqPhUAJFkawCGAGGcGgBbANdkDABD+ZsxPwAUAKBkZH9LgAOMICuJEwX4oPyt95IHmSt5/AzQWTBJWgj7RfyPhu/4pfxEgcl6pN6JD/nzmixLcKYF6dQV+6CHDfXIAe0PEQ2MASn3oHpugyfvnA6NA8j75fa571trWfCGCON0ABsZ8/0Jyd8E25jrbKeSjLupIQRdhCSF3YKjBZKBUgSDDj/oiIfGGaaOFIr6dlv7/QlBC+cRJW5/gPqtgf2EC8L4bBMr/VcjHACRDbj3MW5tG+btYIe8/tZ15fhfBqP45H05Cs2CcfsZ/IcIxfwaAsr4LPccE2kTYXxEgSIFRAuJf8Ju+CwF3juzAQvJ/+Ab+Q9/gFIWBevjVVafmIrSC8+TnACZDXj3Zxc/A+rrFja4/cgHIDzEArzftwkATQF0BcN4gwUAlQEXdswAOe9mhMCHEwAFH5KDkf/F/8DDBcLGOMDCFQDJL1l3azr+wsRqg8GcFQR8MoDAxIzCBMJfB8LBQcH+DsVwRQIx/EL+PsHCAGy6ccTBwYIKxWlDkYiFiAgAiIl3lTqDDQCQTxM6PTKtwRYArFGXBo2NOn9kXMA2C8UvUqvD/23BUxLFGlwo///+wDAxBf77xggAsVggT4/AEPgeWtf/Ris5wPoH/sD9wf5U1QDCpKWAknnCwgTBxvABGmBQa8AG/gv4eGv3+v7/O8BFk10KAI5wgwHEwYh5CgBjf9M4/v4Dwf42CwA2QUx8rUoQAHGN5zv5+QYuwEaJDQBWjRMGKsL+/cRnygB9d1/EfsJ0Yr4SBKWQSXXA/3w6wmo5hQwARJJJBVZ3rAwASZJJwbdYMwYTAH2TVpBFwFKMjBEAhJRTQ3xwOMGAxA4AjFIJ/s7+YmrCHAAmcK05wP+Ad8HDBMHAB8P/w2nAwJMOBGiaIkBWXMBABgRznz3/wIcOxZCg0cFDwVLAwV0fBBCLrcB7wcEHg307hYnAU3ZU1ACFU0iEb8DAwQTBxzh+BACGq0O2CATGyUbC/sFLywBXMDzAwMB4wbODGfjry6lCZsFBmMc5w5BzXFYKxYbmwojAwMH/xMkAjxo1wYVndwvFmezTwcDAaYQHxZTtyXpvIQDq3WjB+pL+wYPCwsUHxMY4xFVqaGjEzwBfATZpwXHCA8Ur+bv+IADn9qkFQ8UHwML/wsPEAMPCB8DCWcHBwARnev4RUwc6ecDAEEH0R8H8/wYQjAxEzP8FEJIQKQXBxPIRhBUwwMK4wsUGBxBUJzeeOgYUrDwkcMQNEDdAnr//WP/ARg7FksbPwMNRTWnCwRBHrvYdAxBJXcP/VroBC0MBAADORVb4AAAAAAAA"
+        }
+      ],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3046,
+      "uid": 157,
+      "cardNo": "10384134",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260815",
+      "endTime": "20260914",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3047,
+      "uid": 155,
+      "cardNo": "7242323",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250824",
+      "endTime": "20260123",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3048,
+      "uid": 156,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250901",
+      "endTime": "20251104",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3049,
+      "uid": 168,
+      "cardNo": "9057536",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260801",
+      "endTime": "20260831",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3051,
+      "uid": 171,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251023",
+      "endTime": "20260122",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3052,
+      "uid": 186,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251214",
+      "endTime": "20260113",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3053,
+      "uid": 185,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20251201",
+      "endTime": "20260303",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 3056,
+      "uid": 107,
+      "cardNo": "4757514",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260820",
+      "endTime": "20260919",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3058,
+      "uid": 5,
+      "cardNo": "14736594",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260818",
+      "endTime": "20260918",
+      "superAuthorize": "0",
+      "empreintes": [
+        {
+          "fingerId": 0,
+          "valid": "1",
+          "size": 1058,
+          "template": "TV9TUzIxAAAEHB8ECAUHCc7QAAAoHXYBAABhhMEqZxzdAFpkYAArAFN4eACiAFlklwAeHdxkRQCSAJJkCRzNANZkVQDrAeZ4rwCwAEdkbwChHDtkUAB3AJhkfhxEAeY4DQDoAet4XQBSAfEmygBHHfcmUgDfAB1kfhz4AFlkJwA/AN94lgDAAFJkQACYHF5kRgAmASNkCRyqAFRkCgA7ANl4uwDKAE1kUgCNHI5knQB8AE1koBx8ACdkUwCSAfQLEgBlAQEZmQDNHNRkiAD/ABNkJBzCAFdkigBiAEp4JwAWAehklwCGHORkYQAzASFktByxALNkHADmAfV4kACAAA9kyQCNHGdkTwBjAKBkLRxMAfpMmwCEAAB4oIRtBdmFNP3JnTgDFP81DcvOAeTc/c37BXU8//fomIFuhO/5dQMx4FgFOJXsD2T3fOtxi8bsXHsk+XEXNwQK9Ar7vAHJ5ncJ/ANWDEcMTRaY/8b1oYAMgX0aOIS5B84BLPclH/PvFQ/dB9+gVA+RCwHTfQh0BKoYU/xugO7xWAfG6dPu5Z/hCwf9nJ/ECNVp/GKpe03k4aK9mdUZuQNmElcSXgg+DfoW2WH8/uqBPXz7g09hmIHOBGd+JfO56WD/9fhZDz/5UJf4kVqALAeMCzYcTW14ewFrrAj9GeP9mINki6jpXgkiE08TWQmfgGMMFAfm+CoPen+/w8b3Xr38j7cBJC8AAgAbBAbFayFxZcAMAJErRYxmdMUOAKE0eovCZt5P/w0AlkBFwmNi/sHD/gMAWEMI3AoAV2HrKzv+P+MIAE9kacEEaTAXAVFpZ35qBFcWHL5aln+Zwq/BfFYSAJ95k8QHkpTjesD+/y4LxU9+QMFuRnMTAFl9jd7FwY3/wcAEwPrjwf5QBwCnuxz5P8EFAJKBDz79+woBpIEkKv77/1AkwPzB/l8axVSA/P4n/v0u/Tr+SFrBPkQOAJhMl8PewsHCw//Arf8VHI+KesORe4r/RNwMAEqN18DhwPkvJwMAzK5GBA8Eh48p/Ck9wII+FRyKkG2Gw2I7O8RZCwBCk1x+kkYAHJiTOjAKAIKVUt3+wVPA/gzFhptLw/5LhTEExXanQoILAJOkPTk+xOPBwf4GAHpiV0vfBACGqUwzygCIt0j/P/7CwTg7SAgByXuikXwHk8VFwv1oEgCqcEnEXzREwPxS/8kAq6lCNj/+TwnFlcVM/kTARxAAXMNI4/7/W8D9wj/AxVkEAB/FU0PVALPRTkfBQMD9mzkKHLrNSf9ES/ldAxxj3VdELAPFuftPwQUQpCRaOi8DHFryWkE/BsV3+EbBwC0GEFjBYsTiPgQQIhZnpAYUXShxwFUEEEhIaUwCEHRbcP7GECBSe8AGEE9YRUnGTkMAC0MBAMULQU4AAAAAAAA="
+        },
+        {
+          "fingerId": 8,
+          "valid": "1",
+          "size": 1310,
+          "template": "TFtTUzIxAAAFGBoECAUHCc7QAAApGXYBAABZhcUxgxiuAD9kkAB+ADZ8ZgCLAOVksgDjGDZkUwDdAPhkMRibAEtkqwC1AJx8kgAHATNkkgBJGO1kqgBFAN1SPxgXAUdPyQCOAOQuoAAqABBRoQAbGPtigQBDAW1kPhhCAUs3kgCQATUjgQCiAEpkVgCsGC1kjQDSAPFkYhh5AFVkbQCpAPF8iwBqAHpkWABnGBxkoAAGAetkURgXATxkgwDhATZ8pQA5AIhTdgAzGIw9awAlAKhkpRg4Aa5kkgCDAbV8TwAKAPRNowC/GEBkWQCWAIhkXRiIANdkogBCAJZ8QwCCANdklgBrGFVkOgDqAIFkyxiBAKYkFQC9ANF8cQAmATRWvgAtGbZOlAAuAfVkQhg0AUFkewD6AS1JUwASAG1kmQACGHVL8fQxFKAM9OwUCZUCIRDEmViJLwTW/W4HdPtLERv+DXcyAeN2jGU4CnIhTAdnAIse25m++mqD0ZNElBwLOQ9qCT8HR0wryDJaqYhMhqDjqY8hjjmKtYLk4Ph6FQ32B84RFJjwiiaEZQyAIWcAxOyd+eXl1AK35Af1AGNtcQQC5bsIo4l/9V1Aiwv5hIXVpTYEFf+3558DxfdaCFP9uWbIAWUFJHN0ePTkbARJdI1+cXerGMP5cYA1AeOAFJhYCLEFuIpAgKvkMwUi+fL2NXsccdN46I+x9EyGuOY/aap5tQJAhwSXQAIpY4l/7At752oJbg5WF17FypC2/KeDVH+MAXgXuYZQhwmStITg5ZSCnfny/dcFdZoYcmV6wHo0+ChuhIBtCEF+2//Qbwv9ASBBAcenIAcEAFUBaf+KBwVwB3D/wXQQxYgWmMCUd3/BW8oAjRSBwMTC/8G0f2ASAVEUa8FuBkwBGJEZgHUEAEMjA30PAGomdMIHwcWfUncRAH4muMT6i33/wFxZBMWKLxFCEgCCLH1XfH7Z/mlaDwCo54mOdMPAkGAEAN00U1cUAKE2iYxTdVPYwXRUBgCc/4bH2ZkEAKQ6CTv/AxifQInCwovAAKZYDf6BAwCsghrFFgFSUV7BfpfBXtkFAG5f9B/PAJt4FylHWRMAo2VZ2nXAwMP/cjpkKxMBj2wTwPw6RPpEDgDX5bTBBcDFb/7EwsSwCMWldYv+xMPFiQ/FU3RCimpbYvwJxa1xPP5Gwf/AHMXRe7PDwIPEjsFJhFRzS/4OAMyAbH7GicXAwpEFAGWHn74RAFePU8I6i2BzQxEAZY9Mp3n7a2xqDACImKzFl9lbXA8AWJqWg8XYamRbEABcX0/EaGb+wWR0C8WRmAb//z5v/wnFNKVIeWDBDACAY0+T2MNFggsAlmwrxV51XBwA2IFxxMXawcHDwcPBBsDH2sNqTmRUC8WCt1tuaIMNAId3PVxmT0YJAGe7hcBx2GgKAJK9MAXAxUFYHgDcqrAEasTZw8OPwcHFO8Jh2lJlPQQAjRE0ahMBeeU3wGqWcw8YU+w6wGJYBwYFIvFGU/8GEFoJNHPABRCkCS0FWQIIlQo0wcH/qR8FwPuxwMBZwAXDxtjCxsXBwsM6wMfb/3LAWcAZxdP4qMFTeJ3GxwfCxNjDwsD/wXjdENUbqkTAacHDAcjBisBiwVQGEJYcMkL+AxA5HUkEBBWZJjR7BRBv7zp7GxGHYrDACtXHJ7P+wv1kwMLJAImzO//DVsHABWAACJQyLVIEEGc8NWVTQgALQwHFAA5dUwAAAAAAAAA="
+        },
+        {
+          "fingerId": 9,
+          "valid": "1",
+          "size": 1210,
+          "template": "TfdTUzIxAAAEtLkECAUHCc7QAAAotXYBAABIhFksUbTaADNkhADCASzQgQCvADBklQCltD9kmAAbAW9kI7SjAEdkngBWAKXxsACoAK9kQgA4taheEQChAINki7RyACRcIQCIARnQkABcAZ9bYwBZtJk6UAAtAK9kbLT7AC1kmAA1ACjQQAC2AD9kpwCftD9kEgDbAPtklrQsAalkZwBHAG7QcgA+AaZkgAA7ta5kJwCIABNkS7RUAZpNHACPAbf/MgBbAZxk8ABptRdRRQAiADNgT7QBATRkUwDVAbDQcACgADNknQCdtNpkXgCLAJBkQLSPAEZkFwB0AM7QyQDkACtk8AA4tbBkwwAZAWxRurQ7AaQ1awCbAZuCuwBOAZ0kTgBCtBdkegmaAj/3fTc3/Or88f0v9TYmJWc1Ae364AF9MysBnX69AjxzBUOPfUJydROKgH87sAFVBQ4NqHw5thtwPoyOhQu//NqAgklvlvmnAoZPS3SGhTP6fHQv404Dzvi2eKMEtrCXh88AHQMb+BrRzWdRDPnoz3cHTyoDMQGlAYMFfKNgLm2T2f3jCMJJWAABFioUKJOyJAuQle5dAzD/4C7oG7kHIYlEgoVfJH1OfRb6aIybV76PeYFGCN8CfTWviBsE3fSoBd3vrZ8En3WIye95yGAYZQpRbvDzbTCYhr6PzwBehQ/L2AQ1lz0D2wRSt0oBJQmm/K78abOv+OICrfmTA4dBi4Gq9/+vfd9SDdoPIDgBAkUjXLwBQxxrwW+tDATaHnrB/qJ1kQQENSV9dQoATu5wxsSC/wsATzCuwcXbwMDBwBEAUDKNMo3BccFq/9EApouSiYjCwXoFZ2C3AYxIFsARxbNWLsOBkoOEasgAoOmWwMLCw4gHwHuyAaxgIv831gDE3qN8kMTAwgfBgMobAIpwk5sGw8V2wsBzwmTBrP/A5wQAknIa/jnCAbSRdx4pEwD5fdNJ/MD8/v/9Ov75df7/wcFKEMU5e+fDwMP+fnO9wBK0Z4RxxpfBBf+PS4rBwMDBhNYAKDHSMDH8//46/j90aQgARoraOPr6nhAAJ4xPakFixXX+wpYVAEFXSW7PecL/wsJSO8T6twFGkknBHsWflxOJwsXBxMIHw8VLwMHBwMDBBcLFdMPB///D/8sAYSL1+P01wUIEWxW0XZjW+Ponj//E3VQMAHCYHDs4xOl5CgCgmy2tSoe4AV6eQ8JwBMFedAoAY549wqDD+88KAGqePX4FeF64AVefQH7BBXBdswFSo0N/iMgAdBc1WcBiwIHIAHEXLENdcHYGxQ+g/WvADgAUpIPAYMx3wMARAChgRsTMcsL/wv7FmAcEAK0twFLBDMWBtplTYIvAEgD6uUfEw1/BcGdgwwBHDUFwwSEA0QetxHRTiIzDksEHwMdKhcLAwMHABGQNtFfeMcBmcsoAFWs7wGf/g8ST/gO0mPErZlcHxQXxiYRzBgBn/fR8+74BbP0twMKUhwykhQkpwf+EOiMUZxOp/8FDYgTBhnbFx8PCwcEFwMV1wMD/w8DBO8PFsBFVFS1wBdWcJZZlBBCVMSlSBRQ/QSDAfgUQ8l4NSjtSQgALQ8QABL9EUgAAAAAAAA=="
+        }
+      ],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3060,
+      "uid": 105,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260819",
+      "endTime": "20260918",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        },
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 3213,
+      "uid": 159,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [
+        {
+          "fingerId": 1,
+          "valid": "1",
+          "size": 2048,
+          "template": "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"
+        }
+      ],
+      "autorisations": []
+    },
+    {
+      "pin": 6105,
+      "uid": 189,
+      "cardNo": "6955889",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20260726",
+      "endTime": "20260825",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 9247,
+      "uid": 170,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 10003,
+      "uid": 158,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 40000,
+      "uid": 133,
+      "cardNo": "12713538",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241127",
+      "endTime": "20251127",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 40026,
+      "uid": 114,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    },
+    {
+      "pin": 54153,
+      "uid": 115,
+      "cardNo": "14857035",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20240911",
+      "endTime": "20251011",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "4"
+        }
+      ]
+    },
+    {
+      "pin": 100000,
+      "uid": 130,
+      "cardNo": "12713538",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241203",
+      "endTime": "20251203",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 100001,
+      "uid": 150,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250714",
+      "endTime": "20260714",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 100002,
+      "uid": 151,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 123412,
+      "uid": 160,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 123456,
+      "uid": 124,
+      "cardNo": "0",
+      "name": "TestUser",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 321231,
+      "uid": 161,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 400186,
+      "uid": 128,
+      "cardNo": "14616605",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241010",
+      "endTime": "20250210",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 400188,
+      "uid": 118,
+      "cardNo": "3617979",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20230101",
+      "endTime": "20250101",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "2"
+        }
+      ]
+    }
+  ]
+}

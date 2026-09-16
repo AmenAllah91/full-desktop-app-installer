@@ -258,7 +258,7 @@ def is_event(line: str) -> bool:
 
 # ─── Horloge des panneaux ────────────────────────────────────────────────
 #
-# Rien, dans YoGym, n'a jamais remis un C3 à l'heure. Les panneaux dérivent
+# Rien, dans Yo-Club, n'a jamais remis un C3 à l'heure. Les panneaux dérivent
 # donc librement depuis leur installation, et c'est LEUR horodatage qui est
 # enregistré comme heure de pointage. Mesuré le 20/08/2026 : 171 s de retard
 # chez vikingsgym (dérive +18 s/jour, relevée sur trois jours de log) et 140 s

@@ -1,0 +1,24 @@
+{
+  "ip": "192.168.1.201",
+  "ancienPin": 40010,
+  "nouveauPin": 100006,
+  "date": "2026-08-22T13:44:18",
+  "fiche": {
+    "UID": "4917",
+    "CardNo": "2329008",
+    "Pin": "40010",
+    "Password": "",
+    "Group": "0",
+    "StartTime": "20200101",
+    "EndTime": "20500101",
+    "Name": "",
+    "SuperAuthorize": "0"
+  },
+  "gabarits": [],
+  "autorisations": [
+    {
+      "timezoneId": "1",
+      "doorId": "15"
+    }
+  ]
+}

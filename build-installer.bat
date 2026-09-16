@@ -5,7 +5,7 @@ setlocal enabledelayedexpansion
 :: Configuration
 :: =======================
 set VERSION=1.0.0
-set APP_NAME=YoGym
+set APP_NAME=Yo-Club
 set OUTPUT_DIR=build-output
 set ELECTRON_APP_DIR=electron-app
 set PYTHON_APP_DIR=pythonApp
@@ -46,7 +46,7 @@ echo 🛠️  Starting automated build process for %APP_NAME% v%VERSION%
 echo.
 echo ==========================================================
 echo   CIBLE : %TARGET_LABEL%
-echo   YOGYM_BASE_URL = %ENV_BASE_URL%
+echo   YOCLUB_BASE_URL = %ENV_BASE_URL%
 echo   KAFKA_BROKER   = %ENV_KAFKA_BROKER%
 echo ==========================================================
 echo.
@@ -112,6 +112,62 @@ xcopy /e /i /y "dist\pythonApp" "..\%OUTPUT_DIR%\python\"
 copy /y "libzkfpcsharp.dll" "..\%OUTPUT_DIR%\python\"
 rmdir /s /q "dist" "build" "__pycache__"
 cd ..
+echo.
+
+:: =======================
+:: Step 2b: Build getuserfacephoto (ConsoleApp1)
+:: =======================
+echo Building face-photo utility (ConsoleApp1)...
+
+:: ConsoleApp1.exe n'est plus versionne : publie en self-contained il pese
+:: 64 Mo, ce qui n'a pas sa place dans le depot. Il est donc reconstruit ici
+:: a partir de la source, qui reste versionnee dans
+:: pythonApp\services\getuserfacephoto (76 Ko : le .cs, le .csproj et
+:: l'assembly d'interop COM).
+::
+:: Le self-contained supprime le prerequis runtime .NET 8 sur le poste CLIENT,
+:: que ni cet installeur ni setupDlls n'ont jamais depose : absent, l'exe
+:: sortait en 0x80008083 et la recuperation des photos de visage echouait en
+:: silence. Le SDK .NET n'est exige que sur CETTE machine de build, au meme
+:: titre que PyInstaller, electron-builder ou NSIS.
+
+where dotnet >nul 2>&1
+if errorlevel 1 (
+    echo [ERREUR] "dotnet" introuvable. Le SDK .NET 8 est requis pour construire
+    echo          ConsoleApp1.exe ^(utilitaire de photos de visage^).
+    echo          Installer avec : winget install Microsoft.DotNet.SDK.8
+    exit /b 1
+)
+
+:: Le RUNTIME seul ne suffit pas : il EXECUTE ConsoleApp1.exe mais ne sait pas
+:: le COMPILER. Sur une machine qui n'a que le runtime, --list-sdks est vide.
+:: Distinguer les deux cas evite de chercher pourquoi "dotnet est pourtant la".
+dotnet --list-sdks 2>nul | findstr /r "[0-9]" >nul
+if errorlevel 1 (
+    echo [ERREUR] Un runtime .NET est present, mais AUCUN SDK.
+    echo          Le runtime execute ConsoleApp1.exe, il ne le compile pas.
+    echo          Installer avec : winget install Microsoft.DotNet.SDK.8
+    exit /b 1
+)
+
+:: Reliquats d'anciennes publications framework-dependent. dotnet publish -o
+:: ne nettoie pas son dossier de sortie : les laisser a cote d'un binaire
+:: single-file self-contained est trompeur, et c'est exactement la famille de
+:: bug du .env perime qui survivait a une mise a jour.
+for %%F in (ConsoleApp1.dll ConsoleApp1.deps.json ConsoleApp1.runtimeconfig.json ConsoleApp1.pdb Interop.zkemkeeper.dll) do (
+    if exist "pythonApp\getuserfacephoto\%%F" del /q "pythonApp\getuserfacephoto\%%F"
+)
+
+dotnet publish "pythonApp\services\getuserfacephoto\ConsoleApp1.csproj" -c Release -o "pythonApp\getuserfacephoto" --nologo
+if errorlevel 1 (
+    echo [ERREUR] Echec de la publication de ConsoleApp1 !
+    exit /b 1
+)
+if not exist "pythonApp\getuserfacephoto\ConsoleApp1.exe" (
+    echo [ERREUR] ConsoleApp1.exe absent apres publication !
+    exit /b 1
+)
+echo OK : ConsoleApp1.exe publie ^(self-contained, aucun prerequis cote client^).
 echo.
 
 :: =======================
@@ -331,7 +387,7 @@ echo # Genere automatiquement par build-installer.bat - cible : %TARGET_LABEL%
 echo # Ne pas editer a la main : toute modification sera ecrasee a la mise a jour.
 echo #
 echo # Racine de la plateforme : lue par le pont Python ET par Electron.
-echo YOGYM_BASE_URL=%ENV_BASE_URL%
+echo YOCLUB_BASE_URL=%ENV_BASE_URL%
 echo.
 echo KAFKA_BROKER=%ENV_KAFKA_BROKER%
 echo KAFKA_GROUP_ID=group_c
@@ -340,7 +396,7 @@ echo.
 echo # PAS de TENANT ni de GYM_BRANCH_ID ici, deliberement. Ce fichier est
 echo # identique sur tous les postes : y laisser une identite ferait demarrer
 echo # un poste vikingsgym sous celle d'empiregym. Les deux valeurs sont saisies
-echo # a la premiere ouverture de YoGym, poste par poste, et le pont REFUSE de
+echo # a la premiere ouverture de Yo-Club, poste par poste, et le pont REFUSE de
 echo # demarrer si elles manquent.
 echo.
 echo FLASK_HOST=0.0.0.0
@@ -381,6 +437,18 @@ if exist "resources" (
     echo This is a placeholder for resources > "installer\resources\README.txt"
 )
 
+:: L'icone de l'installeur est copiee explicitement. La branche "resources"
+:: ci-dessus lit build-output\resources, que l'etape 5 ne remplit qu'avec
+:: SDK.zip : la branche "..\resources\*" n'est donc jamais atteinte et rien
+:: d'autre du dossier resources du depot ne sort d'ici.
+set NSIS_ICON=
+if exist "..\%RESOURCES_DIR%\icon.ico" (
+    copy /y "..\%RESOURCES_DIR%\icon.ico" "installer\resources\"
+    set NSIS_ICON=1
+) else (
+    echo ⚠️ Warning: resources\icon.ico not found - NSIS default icon will be used!
+)
+
 echo.
 
 :: =======================
@@ -398,6 +466,11 @@ echo 📝 Generating NSIS installer script...
     echo.
     echo ^^!define MUI_ABORTWARNING
     echo ^^!define MUI_HEADERIMAGE
+    rem MUI2 impose ses propres icones via MUI_ICON / MUI_UNICON : une directive
+    rem NSIS "Icon" nue serait ecrasee par les icones par defaut du theme. Les
+    rem defines doivent aussi preceder les macros MUI_PAGE_*.
+    if defined NSIS_ICON echo ^^!define MUI_ICON "resources\icon.ico"
+    if defined NSIS_ICON echo ^^!define MUI_UNICON "resources\icon.ico"
     echo.
     echo ^^!insertmacro MUI_PAGE_WELCOME
     echo ^^!insertmacro MUI_PAGE_DIRECTORY

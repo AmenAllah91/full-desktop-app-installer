@@ -65,9 +65,17 @@ function setBridgeState(state, detail = '') {
         const payload = JSON.stringify(bridgeState);
         mainWindow.webContents
             .executeJavaScript(
-                `window.__yogymBridge = ${payload};` +
+                // `__yogymBridge` / `yogym-bridge-status` sont les anciens noms,
+                // d'avant le renommage de la marque. Le front est déployé sur le
+                // serveur et le pont poste par poste : pendant la bascule, un
+                // front encore ancien ne connaît que ces noms-là. On publie donc
+                // les deux, à retirer une fois le front à jour partout.
+                `window.__yoclubBridge = ${payload};` +
+                `window.__yogymBridge = window.__yoclubBridge;` +
+                `window.dispatchEvent(new CustomEvent('yo-club-bridge-status', ` +
+                `{ detail: window.__yoclubBridge }));` +
                 `window.dispatchEvent(new CustomEvent('yogym-bridge-status', ` +
-                `{ detail: window.__yogymBridge }));`
+                `{ detail: window.__yoclubBridge }));`
             )
             .catch(() => {});
     }
@@ -94,16 +102,24 @@ function readBaseUrl() {
     }
 
     try {
-        const line = fs
+        const lines = fs
             .readFileSync(envPath, 'utf-8')
             .split(/\r?\n/)
             .map((l) => l.trim())
-            .filter((l) => l && !l.startsWith('#'))
-            .find((l) => l.startsWith('YOGYM_BASE_URL='));
+            .filter((l) => l && !l.startsWith('#'));
 
-        const value = line ? line.slice('YOGYM_BASE_URL='.length).trim().replace(/\/+$/, '') : '';
+        // `YOGYM_BASE_URL` est l'ancien nom de la clé. Les postes déjà installés
+        // gardent leur .env tant qu'ils ne sont pas réinstallés : ne lire que le
+        // nouveau nom les renverrait tous sur l'URL par défaut, en silence.
+        // Ordre de priorité : nouveau nom, puis ancien.
+        const readKey = (key) => {
+            const line = lines.find((l) => l.startsWith(`${key}=`));
+            return line ? line.slice(key.length + 1).trim().replace(/\/+$/, '') : '';
+        };
+
+        const value = readKey('YOCLUB_BASE_URL') || readKey('YOGYM_BASE_URL');
         if (!value) {
-            log(`YOGYM_BASE_URL absent de ${envPath}, URL par défaut : ${DEFAULT_BASE_URL}`);
+            log(`YOCLUB_BASE_URL absent de ${envPath}, URL par défaut : ${DEFAULT_BASE_URL}`);
             return DEFAULT_BASE_URL;
         }
 
@@ -116,7 +132,7 @@ function readBaseUrl() {
 }
 
 function resolveBridgeExe() {
-    // process.execPath = YoGym.exe une fois installé ; pythonApp.exe est déposé
+    // process.execPath = Yo-Club.exe une fois installé ; pythonApp.exe est déposé
     // à côté par l'installeur. L'ancien spawn('pythonApp.exe') dépendait du
     // répertoire courant du raccourci, donc échouait silencieusement s'il
     // pointait ailleurs.
@@ -169,7 +185,7 @@ function scheduleRestart(reason) {
         if (!fatalNotified) {
             fatalNotified = true;
             dialog.showErrorBox(
-                'YoGym — service biométrique instable',
+                'Yo-Club — service biométrique instable',
                 `Le service de communication avec les pointeuses s'est arrêté ` +
                 `${crashes} fois en moins de 10 minutes.\n\nDernière cause : ${reason}\n\n` +
                 `Les redémarrages continuent au ralenti. Contactez le support en ` +
@@ -198,9 +214,9 @@ function startBridge() {
         if (!fatalNotified) {
             fatalNotified = true;
             dialog.showErrorBox(
-                'YoGym — installation incomplète',
+                'Yo-Club — installation incomplète',
                 `${BRIDGE_EXE_NAME} est introuvable à côté de l'application.\n\n` +
-                `Réinstallez YoGym pour rétablir la communication avec les pointeuses.`
+                `Réinstallez Yo-Club pour rétablir la communication avec les pointeuses.`
             );
         }
         return;
@@ -310,6 +326,33 @@ function startHealthLoop() {
 // Identité du poste : les deux valeurs sont obligatoires et le club doit être
 // numérique. Un tenant vide ou un club non numérique produirait un consumer group
 // erroné et des pointages attribués au mauvais club.
+// Le renommage de la marque change productName, donc le dossier userData :
+// %APPDATA%\YoGym devient %APPDATA%\Yo-Club. config.json y porte le tenant et le
+// club saisis à la première ouverture, et le pont refuse de démarrer sans. Sans
+// reprise, chaque poste devrait être reconfiguré à la main. On recopie donc
+// l'ancien fichier une fois, s'il existe et si le nouveau est absent.
+const LEGACY_CONFIG_PATH = path.join(path.dirname(userDataPath), 'YoGym', 'config.json');
+
+function migrateLegacyConfig() {
+    if (fs.existsSync(CONFIG_PATH) || !fs.existsSync(LEGACY_CONFIG_PATH)) return;
+
+    try {
+        const raw = fs.readFileSync(LEGACY_CONFIG_PATH, 'utf-8');
+        // On ne reprend qu'une identité valide : recopier un fichier tronqué
+        // ferait échouer la validation plus bas sans que l'opérateur comprenne
+        // d'où vient le fichier.
+        if (!isValidConfig(JSON.parse(raw))) {
+            log(`ancien config.json invalide (${LEGACY_CONFIG_PATH}), saisie demandée`);
+            return;
+        }
+        fs.mkdirSync(userDataPath, { recursive: true });
+        fs.writeFileSync(CONFIG_PATH, raw);
+        log(`identité du poste reprise depuis ${LEGACY_CONFIG_PATH}`);
+    } catch (err) {
+        log(`reprise de l'ancien config.json impossible (${err.message}), saisie demandée`);
+    }
+}
+
 function isValidConfig(config) {
     if (!config || typeof config !== 'object') return false;
     const tenant = String(config.tenant ?? '').trim();
@@ -325,7 +368,7 @@ function promptConfig(callback) {
         resizable: false,
         modal: true,
         show: true,
-        icon: path.join(__dirname, 'resources', 'yogymlogo.ico'),
+        icon: path.join(__dirname, 'resources', 'yo-club-logo.ico'),
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false
@@ -386,7 +429,7 @@ function promptConfig(callback) {
     // sans pont et sans message. On arrete franchement.
     promptWin.on('closed', () => {
         if (!submitted) {
-            log('configuration abandonnée — arrêt de YoGym');
+            log('configuration abandonnée — arrêt de Yo-Club');
             app.exit(1);
         }
     });
@@ -396,7 +439,7 @@ function createWindow(config) {
     const win = new BrowserWindow({
         width: 1920,
         height: 1200,
-        icon: path.join(__dirname, 'resources', 'yogymlogo.ico'),
+        icon: path.join(__dirname, 'resources', 'yo-club-logo.ico'),
         webPreferences: {
             contextIsolation: false,
             nodeIntegration: false,
@@ -410,7 +453,8 @@ function createWindow(config) {
             localStorage.setItem('GYM_BRANCH_ID', '${config.gymBranchId}');
             localStorage.setItem('currentGymBranchId', '${config.gymBranchId}');
             localStorage.setItem('TENANT', '${config.tenant}');
-            window.__yogymBridge = ${JSON.stringify(bridgeState)};
+            window.__yoclubBridge = ${JSON.stringify(bridgeState)};
+            window.__yogymBridge = window.__yoclubBridge;
             console.log('[INJECTION OK] sessionStorage now ready');
         `);
     });
@@ -454,6 +498,8 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.whenReady().then(() => {
+        migrateLegacyConfig();
+
         // Le config.json existant n'était jamais vérifié : un fichier tronqué,
         // illisible ou contenant des valeurs vides lançait le pont avec une
         // identité invalide. On le valide, et on redemande la saisie sinon.

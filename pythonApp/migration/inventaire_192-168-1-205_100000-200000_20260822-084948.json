@@ -1,0 +1,85 @@
+{
+  "ip": "192.168.1.205",
+  "port": 4370,
+  "pinMin": 100000,
+  "pinMax": 200000,
+  "date": "2026-08-22T08:49:48",
+  "totalFichesPanneau": 168,
+  "utilisateurs": [
+    {
+      "pin": 100000,
+      "uid": 130,
+      "cardNo": "12713538",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20241203",
+      "endTime": "20251203",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    },
+    {
+      "pin": 100001,
+      "uid": 150,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20250714",
+      "endTime": "20260714",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 100002,
+      "uid": 151,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 123412,
+      "uid": 160,
+      "cardNo": "0",
+      "name": "",
+      "password": "",
+      "group": "0",
+      "startTime": "20001021",
+      "endTime": "20251231",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": []
+    },
+    {
+      "pin": 123456,
+      "uid": 124,
+      "cardNo": "0",
+      "name": "TestUser",
+      "password": "",
+      "group": "0",
+      "startTime": "0",
+      "endTime": "0",
+      "superAuthorize": "0",
+      "empreintes": [],
+      "autorisations": [
+        {
+          "timezoneId": "1",
+          "doorId": "1"
+        }
+      ]
+    }
+  ]
+}

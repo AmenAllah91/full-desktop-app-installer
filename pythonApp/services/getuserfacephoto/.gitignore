@@ -1,0 +1,4 @@
+# Residus de compilation .NET : le binaire publie vit dans
+# pythonApp/getuserfacephoto/, pas ici.
+bin/
+obj/
