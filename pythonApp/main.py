@@ -2445,6 +2445,13 @@ if __name__ == '__main__':
             return [(ctx.machine, ctx.adapter) for ctx in get_all_device_contexts()]
         start_machine_status_broadcast(_tous_les_appareils, interval=5)
 
+        try:
+            import remote_commands
+            from config import YOCLUB_BASE_URL
+            remote_commands.start(tenant, gym_branch_id, KafkaBroker, KAFKA_TOPIC, YOCLUB_BASE_URL)
+        except Exception:
+            logging.exception("Commandes à distance non démarrées")
+
         while True:
             time.sleep(0.01)
 

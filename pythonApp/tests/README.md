@@ -34,6 +34,34 @@ module). Elle protège surtout la **migration de schéma** — les colonnes
 service chez les clients, c'est le risque de déploiement le plus sérieux du
 lot.
 
+## 1 ter. Commandes à distance (`remote_commands.py`)
+
+```
+venv\Scripts\python.exe tests\test_commandes_distance.py
+```
+
+Sans machine, sans réseau, sans Kafka : le module est piloté avec des doublures.
+
+- réglage `REMOTE_COMMANDS_ENABLED` éteint par défaut, et `start()` qui ne crée rien quand il l'est ;
+- démarrage dans `main.py` en toute fin, juste avant la boucle principale, protégé par un `try/except`
+  (lecture de l'AST) ;
+- commande d'une autre filiale ignorée, commande reçue après l'échéance refusée sans toucher la pointeuse ;
+- pointeuse inconnue ou porte invalide refusées **avant** la vérification, pour ne pas consommer la
+  commande au serveur ;
+- vérification auprès du serveur obligatoire avant toute ouverture, avec la cible exacte (pointeuse,
+  porte, adhérent) : le serveur ne confirme qu'une fois et que ce qu'il a enregistré ;
+- même geste que `/door/open` (C3 : porte 1..4 ; autonome : durée seule), durée lue et bornée (1..10 s)
+  **avant** de prendre le verrou, verrou de la machine attendu au plus jusqu'à l'échéance puis toujours
+  rendu, et rendu avant de publier le résultat ;
+- C3 sans session (pointeuse hors ligne ou session en cours de renouvellement) : `open_door` n'est
+  jamais appelé — il ouvrirait une seconde session —, on attend la session par pas de 0,2 s jusqu'à
+  l'échéance ;
+- autonome : sonde TCP bornée puis `zk_sdk_lock` attendu au plus jusqu'à l'échéance ;
+- une ouverture terminée après l'échéance reste `OPENED`, avec son retard en détail ;
+- COM initialisé dans le fil des commandes ;
+- passage publié seulement après une ouverture pour un adhérent, sens tiré de la porte (C3) ou de la
+  fiche (autonome, comme `MonitorZkem`) ; signal de présence.
+
 ## 2. Avec machines — conditions requises
 
 ```
