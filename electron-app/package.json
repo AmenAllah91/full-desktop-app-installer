@@ -38,6 +38,9 @@
     },
     "files": [
       "main.js",
+      "preload.js",
+      "updater.js",
+      "resources/yo-club-logo.ico",
       "/*",
       "!/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!/node_modules/*/{test,tests,tests,powered-test,example,examples}",
