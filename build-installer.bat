@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 :: =======================
 :: Configuration
 :: =======================
-set VERSION=1.0.0
+set VERSION=1.1.0
 set APP_NAME=Yo-Club
 set OUTPUT_DIR=build-output
 set ELECTRON_APP_DIR=electron-app

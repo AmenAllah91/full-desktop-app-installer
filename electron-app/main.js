@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { spawn, exec } = require('child_process');
+const { createUpdater } = require('./updater');
 
 const userDataPath = app.getPath('userData');
 const CONFIG_PATH = path.join(userDataPath, 'config.json');
@@ -49,6 +50,10 @@ let recentCrashes = [];
 let fatalNotified = false;
 let bridgeState = { state: 'stopped', detail: '', since: Date.now() };
 let baseUrl = DEFAULT_BASE_URL;
+let updater = null;
+let tray = null;
+
+const ICON_PATH = path.join(__dirname, 'resources', 'yo-club-logo.ico');
 
 function log(...args) {
     console.log('[SUPERVISOR]', ...args);
@@ -441,9 +446,10 @@ function createWindow(config) {
         height: 1200,
         icon: path.join(__dirname, 'resources', 'yo-club-logo.ico'),
         webPreferences: {
-            contextIsolation: false,
+            contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false
+            sandbox: false,
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 
@@ -483,6 +489,130 @@ function launch(config) {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+
+    startUpdater(config);
+    createTray();
+}
+
+function fromPlatform(event) {
+    try {
+        return new URL(event.senderFrame.url).origin === new URL(baseUrl).origin;
+    } catch {
+        return false;
+    }
+}
+
+function publishUpdateState(state) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('poste-update-state', state);
+    }
+    refreshTray();
+}
+
+function startUpdater(config) {
+    updater = createUpdater({
+        baseUrl,
+        tenant: config.tenant,
+        currentVersion: app.getVersion(),
+        updatesDir: path.join(userDataPath, 'updates'),
+        fetch: (url, options) => net.fetch(url, options),
+        spawn,
+        onState: publishUpdateState,
+        log,
+    });
+
+    ipcMain.handle('poste-update:get', (event) => (fromPlatform(event) ? updater.state() : null));
+    ipcMain.handle('poste-update:check', (event) => (fromPlatform(event) ? updater.check() : null));
+    ipcMain.handle('poste-update:install', (event) =>
+        fromPlatform(event) ? installUpdate() : { started: false, error: 'FORBIDDEN' });
+
+    updater.start();
+}
+
+async function installUpdate() {
+    if (!updater) return { started: false, error: 'NOT_READY' };
+    if (!app.isPackaged) return { started: false, error: 'NOT_PACKAGED' };
+    const result = await updater.install({ appExe: process.execPath, pid: process.pid });
+    if (result.started) {
+        log(`installation de la version ${updater.state().version} lancée, arrêt de Yo-Club`);
+        setTimeout(() => app.quit(), 500);
+    }
+    return result;
+}
+
+async function confirmAndInstall() {
+    const state = updater && updater.state();
+    if (!state || state.status !== 'ready') return;
+    const options = {
+        type: 'question',
+        buttons: ['Installer', 'Annuler'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Mise à jour du poste',
+        message: `Installer la version ${state.version} de Yo-Club ?`,
+        detail: 'Yo-Club va se fermer puis redémarrer. Les pointeuses ne répondront pas pendant environ une minute.',
+    };
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    if (response === 0) await installUpdate();
+}
+
+function updateStatusLabel(state) {
+    switch (state && state.status) {
+        case 'up-to-date':
+            return 'Poste à jour';
+        case 'downloading':
+            return `Téléchargement de la ${state.version} : ${state.progress} %`;
+        case 'ready':
+            return `Mise à jour ${state.version} prête`;
+        case 'installing':
+            return `Installation de la ${state.version}…`;
+        case 'error':
+            return 'Recherche de mise à jour en échec';
+        default:
+            return 'Recherche de mise à jour…';
+    }
+}
+
+function showMainWindow() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+}
+
+function refreshTray() {
+    if (!tray || tray.isDestroyed()) return;
+    const state = updater ? updater.state() : null;
+    const status = state ? state.status : 'idle';
+    tray.setToolTip(`Yo-Club ${app.getVersion()} - ${updateStatusLabel(state)}`);
+    tray.setContextMenu(Menu.buildFromTemplate([
+        { label: `Yo-Club ${app.getVersion()}`, enabled: false },
+        { label: updateStatusLabel(state), enabled: false },
+        { type: 'separator' },
+        {
+            label: status === 'ready' ? `Installer la mise à jour ${state.version}` : 'Installer la mise à jour',
+            enabled: status === 'ready',
+            click: () => { confirmAndInstall(); },
+        },
+        {
+            label: 'Rechercher une mise à jour',
+            enabled: !['downloading', 'installing'].includes(status),
+            click: () => { if (updater) updater.check(); },
+        },
+        { type: 'separator' },
+        { label: 'Afficher Yo-Club', click: showMainWindow },
+    ]));
+}
+
+function createTray() {
+    try {
+        tray = new Tray(ICON_PATH);
+        tray.on('click', showMainWindow);
+        refreshTray();
+    } catch (err) {
+        log(`icône de la zone de notification impossible : ${err.message}`);
+    }
 }
 
 // Deux instances se disputeraient les ports 9998 et 8765, et chacune tuerait le
@@ -532,6 +662,7 @@ async function shutdown() {
 
     if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
     if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+    if (updater) updater.stop();
 
     await killBridge();
 }
