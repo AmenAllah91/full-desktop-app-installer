@@ -285,7 +285,7 @@ if errorlevel 1 (
         )
     )
 ) else (
-    call npm run build
+    call npm run build -- -c.extraMetadata.version=%VERSION%
 )
 
 if exist "dist\win-unpacked" (
@@ -457,8 +457,9 @@ echo.
 echo 📝 Generating NSIS installer script...
 (
     echo ^^!include "MUI2.nsh"
+    echo ^^!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP_NAME%"
     echo Name "%APP_NAME%"
-    echo OutFile "%APP_NAME%Installer.exe"
+    echo OutFile "%APP_NAME%Installer-%VERSION%.exe"
     echo InstallDir "$PROGRAMFILES\%APP_NAME%"
     echo CRCCheck on
     echo SilentInstall normal
@@ -478,18 +479,33 @@ echo 📝 Generating NSIS installer script...
     echo ^^!insertmacro MUI_PAGE_FINISH
     echo.
     echo Section "Main Application"
+    echo   nsExec::Exec 'taskkill /F /T /IM %APP_NAME%.exe'
+    echo   Pop $0
+    echo   nsExec::Exec 'taskkill /F /T /IM pythonApp.exe'
+    echo   Pop $0
+    echo   nsExec::Exec 'taskkill /F /IM ConsoleApp1.exe'
+    echo   Pop $0
+    echo   Sleep 1500
     echo   SetOutPath "$INSTDIR"
     echo   ; Le .env porte l'environnement cible. SetOverwrite ifnewer compare les
     echo   ; horodatages, et copy preserve celui de la source : un .env perime
     echo   ; pouvait donc survivre a une mise a jour. On le supprime d'abord.
     echo   Delete "$INSTDIR\.env"
-    echo   SetOverwrite ifnewer
+    echo   SetOverwrite on
     echo   File /r "*.*"
     echo   CreateDirectory "$INSTDIR\logs"
     echo   CreateDirectory "$SMPROGRAMS\%APP_NAME%"
     echo   CreateShortCut "$SMPROGRAMS\%APP_NAME%\%APP_NAME%.lnk" "$INSTDIR\%APP_NAME%.exe"
     echo   CreateShortCut "$DESKTOP\%APP_NAME%.lnk" "$INSTDIR\%APP_NAME%.exe"
     echo   WriteUninstaller "$INSTDIR\uninstall.exe"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "%APP_NAME%"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "%VERSION%"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "%APP_NAME%"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\%APP_NAME%.exe"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+    echo   WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+    echo   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
+    echo   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
     echo SectionEnd
     echo.
     echo Section "SDK Dependencies Setup"
@@ -507,13 +523,21 @@ echo 📝 Generating NSIS installer script...
     echo   RMDir "$SMPROGRAMS\%APP_NAME%"
     echo   Delete "$DESKTOP\%APP_NAME%.lnk"
     echo   Delete "$INSTDIR\uninstall.exe"
+    echo   DeleteRegKey HKLM "${UNINSTALL_KEY}"
     echo SectionEnd
     echo.
     echo Function .onInstSuccess
-    echo   MessageBox MB_OK "Installation completed successfully!"
+    echo   MessageBox MB_OK "Installation completed successfully!" /SD IDOK
     echo FunctionEnd
     echo.
     echo ^^!insertmacro MUI_LANGUAGE "English"
+    echo.
+    echo VIProductVersion "%VERSION%.0"
+    echo VIAddVersionKey "ProductName" "%APP_NAME%"
+    echo VIAddVersionKey "ProductVersion" "%VERSION%"
+    echo VIAddVersionKey "FileVersion" "%VERSION%"
+    echo VIAddVersionKey "FileDescription" "Installeur %APP_NAME%"
+    echo VIAddVersionKey "LegalCopyright" "%APP_NAME%"
 ) > "installer\installer.nsi"
 echo.
 
@@ -548,7 +572,7 @@ if %NSIS_FOUND%==1 (
         exit /b 1
     )
 ) else (
-    echo ❌ NSIS (makensis.exe) not found!
+    echo ❌ NSIS ^(makensis.exe^) not found!
     echo Please install NSIS from https://nsis.sourceforge.io/Download
     echo.
     echo To continue without NSIS, copying files to output directory...
@@ -556,12 +580,12 @@ if %NSIS_FOUND%==1 (
     mkdir ..\resources 2>nul
     xcopy /e /i /y resources\* ..\resources\
     cd ..
-    echo ✅ Files copied to %cd%
+    echo ✅ Files copied to !cd!
     exit /b 0
 )
 
-if exist "%APP_NAME%Installer.exe" (
-    move "%APP_NAME%Installer.exe" ..
+if exist "%APP_NAME%Installer-%VERSION%.exe" (
+    move "%APP_NAME%Installer-%VERSION%.exe" ..
 )
 
 cd ..
@@ -573,14 +597,14 @@ echo.
 echo 🎉 Installer created successfully!
 echo.
 echo 📦 Output Location:
-echo %cd%\%APP_NAME%Installer.exe
+echo %cd%\%APP_NAME%Installer-%VERSION%.exe
 echo.
 echo ✅ Installation will include:
 echo - Electron app (%APP_NAME%.exe)
 echo - Python backend (pythonApp.exe)
 echo - SDK files (resources directory)
 echo - SetupDlls.exe for SDK setup
-echo - Desktop & Start menu shortcuts
+echo - Desktop ^& Start menu shortcuts
 echo.
 echo 🚀 Run the installer to complete installation
 
