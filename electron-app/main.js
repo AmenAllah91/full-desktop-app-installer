@@ -379,7 +379,7 @@ function activationPage(existingConfig) {
     const needsBranch = !existingConfig;
     return `
         <html>
-            <head><meta charset="utf-8"></head>
+            <head><meta charset="utf-8"><title>Yo-Club · Activation du poste</title></head>
             <body style="font-family: sans-serif; padding: 20px;">
                 <h3>Activation du poste</h3>
                 <input id="club" placeholder="Club" style="width:100%; margin-bottom:10px;" />
