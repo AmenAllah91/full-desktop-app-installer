@@ -1,12 +1,14 @@
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, net, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { spawn, exec } = require('child_process');
 const { createUpdater } = require('./updater');
+const activation = require('./activation');
 
 const userDataPath = app.getPath('userData');
 const CONFIG_PATH = path.join(userDataPath, 'config.json');
+const IDENTITY_PATH = path.join(userDataPath, activation.IDENTITY_FILE);
 
 // ---------------------------------------------------------------------------
 // Supervision du pont Python
@@ -40,6 +42,7 @@ const DEFAULT_BASE_URL = 'https://account.yo-club.app';
 let mainWindow = null;
 let bridge = null;
 let bridgeConfig = null;
+let posteIdentity = null;
 let shuttingDown = false;
 let restartTimer = null;
 let healthTimer = null;
@@ -228,13 +231,18 @@ function startBridge() {
     }
 
     const cwd = path.dirname(exePath);
-    log(`démarrage : ${exePath} ${bridgeConfig.tenant} ${bridgeConfig.gymBranchId} (cwd=${cwd})`);
+    if (posteIdentity) {
+        log(`démarrage : ${exePath} (poste activé, cwd=${cwd})`);
+    } else {
+        log(`démarrage : ${exePath} ${bridgeConfig.tenant} ${bridgeConfig.gymBranchId} (poste non activé, cwd=${cwd})`);
+    }
 
     lastSpawnAt = Date.now();
     healthFailures = 0;
 
     bridge = spawn(exePath, [bridgeConfig.tenant, bridgeConfig.gymBranchId], {
         cwd,
+        env: activation.bridgeEnv(posteIdentity),
         windowsHide: true,
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -365,11 +373,80 @@ function isValidConfig(config) {
     return tenant.length > 0 && /^\d+$/.test(branch);
 }
 
-function promptConfig(callback) {
-    let submitted = false;
+function activationPage(existingConfig) {
+    const club = existingConfig ? existingConfig.tenant : '';
+    const needsBranch = !existingConfig;
+    return `
+        <html>
+            <head><meta charset="utf-8"></head>
+            <body style="font-family: sans-serif; padding: 20px;">
+                <h3>Activation du poste</h3>
+                <input id="club" placeholder="Club" style="width:100%; margin-bottom:10px;" />
+                <input id="code" placeholder="Code d'activation (ABCD-EFGH-JKLM-NPQR)" style="width:100%; margin-bottom:10px;" autocomplete="off" />
+                <div id="err" style="color:#c0392b; font-size:13px; min-height:18px; margin-bottom:8px;"></div>
+                <button id="activate" onclick="activate()">Activer</button>
+                <hr style="margin:16px 0;" />
+                <div id="branchBox" style="display:none;">
+                    <input id="branch" placeholder="ID de la salle (GymBranchId)" style="width:100%; margin-bottom:10px;" />
+                </div>
+                <button id="skip" onclick="skip()">Continuer sans activer</button>
+                <script>
+                    const { ipcRenderer } = require('electron');
+                    const needsBranch = ${JSON.stringify(needsBranch)};
+                    document.getElementById('club').value = ${JSON.stringify(club)};
+                    const err = document.getElementById('err');
+                    function busy(state) {
+                        document.getElementById('activate').disabled = state;
+                        document.getElementById('skip').disabled = state;
+                    }
+                    async function activate() {
+                        const club = document.getElementById('club').value.trim();
+                        const code = document.getElementById('code').value.trim();
+                        err.style.color = '#c0392b';
+                        if (!club) { err.textContent = 'Le club est obligatoire.'; return; }
+                        if (!code) { err.textContent = "Le code d'activation est obligatoire."; return; }
+                        err.style.color = '#555';
+                        err.textContent = 'Activation en cours…';
+                        busy(true);
+                        const result = await ipcRenderer.invoke('poste-activation:activate', { club, code });
+                        busy(false);
+                        if (!result || !result.ok) {
+                            err.style.color = '#c0392b';
+                            err.textContent = (result && result.message) || 'Activation impossible.';
+                        }
+                    }
+                    function skip() {
+                        err.style.color = '#c0392b';
+                        if (!needsBranch) {
+                            ipcRenderer.send('poste-activation:skip', null);
+                            return;
+                        }
+                        const box = document.getElementById('branchBox');
+                        if (box.style.display === 'none') {
+                            box.style.display = 'block';
+                            err.textContent = "Sans activation, indiquez l'ID de la salle puis cliquez à nouveau.";
+                            return;
+                        }
+                        const tenant = document.getElementById('club').value.trim();
+                        const gymBranchId = document.getElementById('branch').value.trim();
+                        if (!tenant) { err.textContent = 'Le club est obligatoire.'; return; }
+                        if (!/^\\d+$/.test(gymBranchId)) {
+                            err.textContent = "L'ID de la salle est obligatoire et doit être un nombre.";
+                            return;
+                        }
+                        ipcRenderer.send('poste-activation:skip', { tenant, gymBranchId });
+                    }
+                </script>
+            </body>
+        </html>
+    `;
+}
+
+function promptActivation(existingConfig, callback) {
+    let done = false;
     const promptWin = new BrowserWindow({
-        width: 400,
-        height: 250,
+        width: 460,
+        height: 400,
         resizable: false,
         modal: true,
         show: true,
@@ -379,62 +456,74 @@ function promptConfig(callback) {
             contextIsolation: false
         }
     });
+    const promptContents = promptWin.webContents;
+    const fromPrompt = (event) => event.sender === promptContents;
 
-    promptWin.loadURL(
-        'data:text/html,' +
-            encodeURIComponent(`
-        <html>
-            <body style="font-family: sans-serif; padding: 20px;">
-                <h3>Configuration initiale</h3>
-                <input id="tenant" placeholder="Identifiant du tenant" style="width:100%; margin-bottom:10px;" />
-                <input id="branch" placeholder="ID de la salle (GymBranchId)" style="width:100%; margin-bottom:10px;" />
-                <div id="err" style="color:#c0392b; font-size:13px; min-height:18px; margin-bottom:8px;"></div>
-                <button onclick="submit()">Valider</button>
-                <script>
-                    const { ipcRenderer } = require('electron');
-                    // Sans validation, un clic sur "Valider" a vide envoyait deux
-                    // chaines vides : le pont basculait alors sur le .env, commun a
-                    // tous les installeurs, et le poste tournait sous l'identite
-                    // d'un autre club.
-                    function submit() {
-                        const tenant = document.getElementById('tenant').value.trim();
-                        const gymBranchId = document.getElementById('branch').value.trim();
-                        const err = document.getElementById('err');
-                        if (!tenant) {
-                            err.textContent = 'Le tenant est obligatoire.';
-                            return;
-                        }
-                        if (!/^\\d+$/.test(gymBranchId)) {
-                            err.textContent = "L'ID de la salle est obligatoire et doit etre un nombre.";
-                            return;
-                        }
-                        err.textContent = '';
-                        ipcRenderer.send('config-submitted', { tenant, gymBranchId });
-                    }
-                </script>
-            </body>
-        </html>
-    `)
-    );
+    const release = () => {
+        ipcMain.removeHandler('poste-activation:activate');
+        ipcMain.removeAllListeners('poste-activation:skip');
+    };
 
-    // Deuxieme barriere, cote processus principal : on ne fait confiance ni au
-    // renderer ni a un config.json edite a la main.
-    ipcMain.once('config-submitted', (event, data) => {
+    const finish = (config, identity) => {
+        done = true;
+        release();
+        promptWin.close();
+        callback(config, identity);
+    };
+
+    ipcMain.handle('poste-activation:activate', async (event, data) => {
+        if (done || !fromPrompt(event)) return { ok: false, message: 'Activation impossible.' };
+        const result = await activation.activate({
+            baseUrl,
+            club: data && data.club,
+            code: data && data.code,
+            fetch: (url, options) => net.fetch(url, options),
+        });
+        if (!result.ok) {
+            log('activation du poste refusée');
+            return { ok: false, message: result.message };
+        }
+        if (done) return { ok: false, message: 'Activation impossible.' };
+        try {
+            activation.saveIdentity({ filePath: IDENTITY_PATH, identity: result.identity, safeStorage, fs });
+        } catch (err) {
+            log(`identité du poste non enregistrée : ${err.message}`);
+            return { ok: false, message: 'Identité du poste impossible à enregistrer sur ce PC. Contactez Yo-Club.' };
+        }
+        const config = activation.bridgeLaunchConfig(null, result.identity);
+        try {
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+        } catch (err) {
+            log(`config.json non mis à jour : ${err.message}`);
+        }
+        log('poste activé');
+        finish(config, result.identity);
+        return { ok: true };
+    });
+
+    ipcMain.on('poste-activation:skip', (event, data) => {
+        if (done || !fromPrompt(event)) return;
+        if (existingConfig) {
+            log('activation reportée, config.json conservé');
+            finish(existingConfig, null);
+            return;
+        }
         if (!isValidConfig(data)) {
             log('configuration invalide reçue, saisie ignorée');
             return;
         }
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2));
-        submitted = true;
-        promptWin.close();
-        callback(data);
+        const config = { tenant: String(data.tenant).trim(), gymBranchId: String(data.gymBranchId).trim() };
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+        log('activation reportée, configuration saisie à la main');
+        finish(config, null);
     });
 
-    // Fermer la fenetre sans valider laissait l'application en vie sans identite,
-    // sans pont et sans message. On arrete franchement.
+    promptWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(activationPage(existingConfig)));
+
     promptWin.on('closed', () => {
-        if (!submitted) {
-            log('configuration abandonnée — arrêt de Yo-Club');
+        if (!done) {
+            release();
+            log('activation abandonnée — arrêt de Yo-Club');
             app.exit(1);
         }
     });
@@ -479,18 +568,18 @@ function createWindow(config) {
     return win;
 }
 
-function launch(config) {
-    bridgeConfig = config;
-    baseUrl = readBaseUrl();
+function launch(config, identity) {
+    posteIdentity = identity || null;
+    bridgeConfig = activation.bridgeLaunchConfig(config, posteIdentity);
     startBridge();
     startHealthLoop();
-    mainWindow = createWindow(config);
+    mainWindow = createWindow(bridgeConfig);
 
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
 
-    startUpdater(config);
+    startUpdater(bridgeConfig);
     createTray();
 }
 
@@ -647,11 +736,16 @@ if (!app.requestSingleInstanceLock()) {
             }
         }
 
-        if (config) {
-            log(`identité du poste : tenant=${config.tenant} club=${config.gymBranchId}`);
-            launch(config);
+        baseUrl = readBaseUrl();
+        const identity = activation.loadIdentity({ filePath: IDENTITY_PATH, safeStorage, fs });
+
+        if (identity) {
+            log('poste activé');
+            launch(config, identity);
         } else {
-            promptConfig((valid) => launch(valid));
+            if (fs.existsSync(IDENTITY_PATH)) log('identité du poste illisible, nouvelle activation demandée');
+            if (config) log(`poste non activé, config.json : tenant=${config.tenant} club=${config.gymBranchId}`);
+            promptActivation(config, (chosen, activated) => launch(chosen, activated));
         }
     });
 }
