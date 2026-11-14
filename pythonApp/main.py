@@ -13,6 +13,7 @@ import sqlite3
 
 import pythoncom
 
+from services.identitePoste import IdentitePoste, service_machines, copie_de_secours
 from domain import Operation
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
@@ -22,6 +23,8 @@ from services.common import zk_sdk_lock, tcp_reachable
 from services.captureFingerPrint import FingerprintCapture
 from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
+from config import YOCLUB_BASE_URL
+from remote_commands import BRIDGE_VERSION
 from services.MachineMonitor import (monitor_machine, make_rt_json, kafka,
                                      attempt_c3_reconnection, ensure_c3_session,
                                      synchroniser_horloge_si_besoin)
@@ -246,7 +249,12 @@ fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker,
                                  group_id=f"fingerprint_{_KAFKA_GROUP_SUFFIX}",
                                  auto_offset_reset="latest")
 
-machineService = AccessMachineService()
+POSTE = IdentitePoste.depuis_env()
+if POSTE is not None:
+    logging.info("🔐 Identité du poste présente : pointeuses et confirmations par les routes du poste")
+    if POSTE.club != tenant or POSTE.filiale != str(currentGymBranchId):
+        logging.warning("⚠️ L'identité du poste ne correspond pas au club ou à la filiale passés en arguments")
+machineService = service_machines(POSTE, YOCLUB_BASE_URL, BRIDGE_VERSION, APP_DATA_DIR, AccessMachineService)
 
 # Global variables and synchronization primitives
 device_handle = None
@@ -437,6 +445,12 @@ def fetch_machines_with_retry(tenant: str, gym_branch_id: str,
         try:
             return machineService.get_access_machines(gym_branch_id, tenant)
         except Exception as exc:
+            copie = copie_de_secours(machineService)
+            if copie is not None:
+                logging.warning("⚠️ Liste des machines indisponible (%s) — démarrage sur la copie locale "
+                                "(%s machine(s)), le rafraîchissement périodique prendra le relais",
+                                exc, len(copie))
+                return copie
             if waited >= max_wait:
                 logging.error(
                     "❌ Liste des machines toujours indisponible après %ss (%s) — "
@@ -2247,8 +2261,7 @@ def get_fingerprints_api(user_pin, gym_branch_id, machine_id):
         ctx = get_device_context(machine_id)
         if not ctx:
             try:
-                ms = AccessMachineService()
-                machines = ms.get_access_machines(str(gym_branch_id), str(tenant))
+                machines = machineService.get_access_machines(str(gym_branch_id), str(tenant))
                 for m in machines:
                     DeviceManager.register(m, tenant, gym_branch_id)
                 ctx = get_device_context(machine_id)
@@ -2359,7 +2372,6 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, handle_sigterm)
     start_ws_server()
     driver = None
-    machineService = AccessMachineService()
 
     if len(sys.argv) < 3:
         logging.error("Expected arguments: TENANT GYM_BRANCH_ID")
@@ -2448,7 +2460,8 @@ if __name__ == '__main__':
         try:
             import remote_commands
             from config import YOCLUB_BASE_URL
-            remote_commands.start(tenant, gym_branch_id, KafkaBroker, KAFKA_TOPIC, YOCLUB_BASE_URL)
+            remote_commands.start(tenant, gym_branch_id, KafkaBroker, KAFKA_TOPIC, YOCLUB_BASE_URL,
+                                  poste=getattr(machineService, "client", None))
         except Exception:
             logging.exception("Commandes à distance non démarrées")
 

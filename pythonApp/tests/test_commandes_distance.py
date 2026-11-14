@@ -109,7 +109,7 @@ class Ctx:
 
 class Banc:
     def __init__(self, contexts=None, check=204, check_error=None, clock=None, reachable=True,
-                 sdk_lock=None, on_produce=None):
+                 sdk_lock=None, on_produce=None, poste=None):
         self.producer = FakeProducer(on_produce)
         self.checks = []
         self.passages = []
@@ -135,7 +135,7 @@ class Banc:
                                 device_context=lambda mid: contexts.get(mid),
                                 device_contexts=lambda: list(contexts.values()),
                                 publish_passage=lambda *args: self.passages.append(args),
-                                reachable=probe, sdk_lock=self.sdk_lock, sleep=self.sleep)
+                                reachable=probe, sdk_lock=self.sdk_lock, sleep=self.sleep, poste=poste)
 
     def now_ms(self):
         if self.ticks:
@@ -474,6 +474,59 @@ def _():
     egal(signal["capabilities"], ["OPEN_DOOR"], "capacités")
     egal(signal["sentAtPcMs"], NOW, "heure du PC")
     egal(signal["machines"], [{"id": 12, "connected": True}, {"id": 13, "connected": None}], "pointeuses")
+
+
+class FakePoste:
+    def __init__(self, reponse=True, erreur=None):
+        self.reponse = reponse
+        self.erreur = erreur
+        self.appels = []
+
+    def commande_confirmee(self, command_id, params, timeout):
+        self.appels.append((command_id, params, timeout))
+        if self.erreur:
+            raise self.erreur
+        return self.reponse
+
+
+@suite.test("avec l'identité du poste, la vérification passe par la route du poste")
+def _():
+    adapter = PlcommAdapter()
+    poste = FakePoste(True)
+    b = Banc({12: Ctx(Machine(12), adapter)}, poste=poste)
+    egal(b.r.handle(command(memberPin="7")), "OPENED", "confirmée")
+    egal(b.checks, [], "route publique non appelée")
+    egal(poste.appels, [("c1", {"gymBranchId": "1003", "machineId": 12, "door": 2, "memberPin": "7"}, 2)],
+         "mêmes paramètres que la route publique")
+    poste = FakePoste(False)
+    b = Banc({12: Ctx(Machine(12), PlcommAdapter())}, poste=poste)
+    egal(b.r.handle(command()), "REJECTED", "non confirmée")
+    poste = FakePoste(erreur=OSError("réseau"))
+    b = Banc({12: Ctx(Machine(12), PlcommAdapter())}, poste=poste)
+    egal(b.r.handle(command()), "REJECTED", "injoignable")
+
+
+@suite.test("start() transmet l'identité du poste au module")
+def _():
+    vus = []
+    avant_enabled, avant_classe = remote_commands.enabled, remote_commands.RemoteCommands
+
+    class Espion:
+        def __init__(self, *args, **kwargs):
+            vus.append(kwargs.get("poste"))
+
+        def start(self):
+            pass
+    try:
+        remote_commands.enabled = lambda env=None: True
+        remote_commands.RemoteCommands = Espion
+        poste = FakePoste()
+        remote_commands.start("empire", "1003", "broker", "rt_pointage", "https://x", poste=poste)
+        remote_commands.start("empire", "1003", "broker", "rt_pointage", "https://x")
+    finally:
+        remote_commands.enabled, remote_commands.RemoteCommands = avant_enabled, avant_classe
+    egal(len(vus), 2, "deux démarrages")
+    verifier(vus[0] is poste and vus[1] is None, "identité transmise, absente sinon")
 
 
 if __name__ == "__main__":

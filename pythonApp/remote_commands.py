@@ -35,14 +35,14 @@ def enabled(env=None):
     return str(value).strip().lower() in ("1", "true", "yes", "oui")
 
 
-def start(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url):
+def start(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=None):
     if not enabled():
         logger.info("Commandes à distance désactivées (REMOTE_COMMANDS_ENABLED absent)")
         return None
     if not (tenant and gym_branch_id and kafka_broker and base_url):
         logger.warning("Commandes à distance non démarrées : identité ou adresses manquantes")
         return None
-    runner = RemoteCommands(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url)
+    runner = RemoteCommands(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=poste)
     runner.start()
     logger.info("Commandes à distance démarrées (%s, filiale %s)", tenant, gym_branch_id)
     return runner
@@ -128,7 +128,7 @@ class RemoteCommands:
     def __init__(self, tenant, gym_branch_id, kafka_broker, pointage_topic, base_url,
                  producer=None, consumer_factory=None, http_get=None, now_ms=None,
                  device_context=None, device_contexts=None, publish_passage=None,
-                 reachable=None, sdk_lock=None, sleep=None):
+                 reachable=None, sdk_lock=None, sleep=None, poste=None):
         self.tenant = tenant
         self.gym_branch_id = str(gym_branch_id)
         self.kafka_broker = kafka_broker
@@ -146,6 +146,7 @@ class RemoteCommands:
         self._sdk_lock = sdk_lock
         self._sleep = sleep or time.sleep
         self._stop = threading.Event()
+        self._poste = poste
 
     def start(self):
         if self._producer is None:
@@ -255,14 +256,16 @@ class RemoteCommands:
 
     def _confirmed(self, message):
         command_id = message.get("commandId")
-        url = (f"{self.base_url}/gym-management/public/device/commands/"
-               f"{self.tenant}/{command_id}/check")
         params = {"gymBranchId": self.gym_branch_id, "machineId": message.get("machineId")}
         if message.get("door") is not None:
             params["door"] = message.get("door")
         if message.get("memberPin"):
             params["memberPin"] = message.get("memberPin")
         try:
+            if self._poste is not None:
+                return self._poste.commande_confirmee(command_id, params, CHECK_TIMEOUT)
+            url = (f"{self.base_url}/gym-management/public/device/commands/"
+                   f"{self.tenant}/{command_id}/check")
             response = self._http_get(url, params=params, timeout=CHECK_TIMEOUT)
             return response.status_code == 204
         except Exception as ex:
