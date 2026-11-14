@@ -73,7 +73,7 @@ KAFKA_GROUP_ID=group_c
 KAFKA_TOPIC=rt_pointage
 GYM_BRANCH_ID=0
 
-FLASK_HOST=0.0.0.0
+FLASK_HOST=127.0.0.1
 FLASK_PORT=9998
 
 PLCOMPRO_URL=plcommpro.dll
@@ -265,7 +265,7 @@ APP_STARTED_AT = time.time()
 # Configuration constants
 DEVICE_IP = os.getenv("DEVICE_IP")
 DEVICE_PORT = os.getenv("DEVICE_PORT")
-FLASK_HOST = os.getenv("FLASK_HOST")
+FLASK_HOST = "127.0.0.1"
 FLASK_PORT = int(os.getenv("FLASK_PORT"))
 MAX_LOCK_RETRIES = 3
 LOCK_TIMEOUT = 10

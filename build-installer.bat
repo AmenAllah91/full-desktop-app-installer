@@ -399,7 +399,7 @@ echo # un poste vikingsgym sous celle d'empiregym. Les deux valeurs sont saisies
 echo # a la premiere ouverture de Yo-Club, poste par poste, et le pont REFUSE de
 echo # demarrer si elles manquent.
 echo.
-echo FLASK_HOST=0.0.0.0
+echo FLASK_HOST=127.0.0.1
 echo FLASK_PORT=9998
 echo.
 echo PLCOMPRO_URL=plcommpro.dll
