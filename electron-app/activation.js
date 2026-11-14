@@ -100,7 +100,7 @@ function loadIdentity({ filePath, safeStorage, fs }) {
     }
 }
 
-function bridgeEnv(identity, baseEnv = process.env) {
+function bridgeEnv(identity, baseEnv = process.env, { version } = {}) {
     const env = {};
     for (const [key, value] of Object.entries(baseEnv)) {
         if (!key.toUpperCase().startsWith(ENV_PREFIX)) env[key] = value;
@@ -114,6 +114,7 @@ function bridgeEnv(identity, baseEnv = process.env) {
         YOCLUB_POSTE_TOKEN_URL: identity.tokenUrl,
         YOCLUB_POSTE_NUMERO: String(identity.numero),
         YOCLUB_POSTE_FILIALE: String(identity.gymBranchId),
+        ...(version ? { YOCLUB_POSTE_VERSION: String(version) } : {}),
     };
 }
 

@@ -13,7 +13,7 @@ import sqlite3
 
 import pythoncom
 
-from services.identitePoste import IdentitePoste, service_machines, copie_de_secours
+from services.identitePoste import IdentitePoste, service_machines, copie_de_secours, version_poste
 from domain import Operation
 from kafka_service.kafkaservice import KafkaService
 from services.DeviceMAnager import DeviceManager
@@ -254,7 +254,7 @@ if POSTE is not None:
     logging.info("🔐 Identité du poste présente : pointeuses et confirmations par les routes du poste")
     if POSTE.club != tenant or POSTE.filiale != str(currentGymBranchId):
         logging.warning("⚠️ L'identité du poste ne correspond pas au club ou à la filiale passés en arguments")
-machineService = service_machines(POSTE, YOCLUB_BASE_URL, BRIDGE_VERSION, APP_DATA_DIR, AccessMachineService)
+machineService = service_machines(POSTE, YOCLUB_BASE_URL, version_poste(BRIDGE_VERSION), APP_DATA_DIR, AccessMachineService)
 
 # Global variables and synchronization primitives
 device_handle = None

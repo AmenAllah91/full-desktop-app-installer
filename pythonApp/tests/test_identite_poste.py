@@ -381,6 +381,38 @@ def _():
         b.nettoyer()
 
 
+@suite.test("version du poste : YOCLUB_POSTE_VERSION si présente, sinon la valeur par défaut")
+def _():
+    egal(ip.version_poste("remote-1", {"YOCLUB_POSTE_VERSION": "1.4.0"}), "1.4.0", "variable présente")
+    egal(ip.version_poste("remote-1", {"YOCLUB_POSTE_VERSION": "  1.4.0 "}), "1.4.0", "espaces retirés")
+    egal(ip.version_poste("remote-1", {"YOCLUB_POSTE_VERSION": "  "}), "remote-1", "variable vide")
+    egal(ip.version_poste("remote-1", {}), "remote-1", "variable absente")
+
+
+@suite.test("version du poste lue au lancement, avant tout .env")
+def _():
+    ancienne = os.environ.get("YOCLUB_POSTE_VERSION")
+    try:
+        os.environ["YOCLUB_POSTE_VERSION"] = "9.9.9"
+        egal(ip.version_poste("remote-1"), ip._VERSION_AU_LANCEMENT or "remote-1", "valeur figée au lancement")
+    finally:
+        if ancienne is None:
+            os.environ.pop("YOCLUB_POSTE_VERSION", None)
+        else:
+            os.environ["YOCLUB_POSTE_VERSION"] = ancienne
+
+
+@suite.test("main.py : la version remise par Electron part dans X-Yoclub-Poste-Version")
+def _():
+    import ast
+    chemin = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
+    source = open(chemin, encoding="utf-8").read()
+    appels = [ast.unparse(n) for n in ast.walk(ast.parse(source))
+              if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "service_machines"]
+    egal(len(appels), 1, "un seul branchement du service des pointeuses")
+    verifier("version_poste(BRIDGE_VERSION)" in appels[0], "version_poste(BRIDGE_VERSION) attendu : " + appels[0])
+
+
 @suite.test("main.py : identité lue avant tout .env, copie de secours au démarrage")
 def _():
     import ast

@@ -16,6 +16,7 @@ VARIABLES = {
     "numero": "YOCLUB_POSTE_NUMERO",
     "filiale": "YOCLUB_POSTE_FILIALE",
 }
+VARIABLE_VERSION = "YOCLUB_POSTE_VERSION"
 FICHIER_COPIE = "machines_poste.json"
 ROUTE_MACHINES = "/gym-management/api/poste/machines"
 ROUTE_COMMANDES = "/gym-management/api/poste/commandes/"
@@ -26,6 +27,12 @@ DELAI_LECTURE = 5
 logger = logging.getLogger("identite_poste")
 
 _ENV_AU_LANCEMENT = {nom: os.environ.get(nom) for nom in VARIABLES.values()}
+_VERSION_AU_LANCEMENT = os.environ.get(VARIABLE_VERSION)
+
+
+def version_poste(defaut, env=None):
+    valeur = _VERSION_AU_LANCEMENT if env is None else env.get(VARIABLE_VERSION)
+    return str(valeur or "").strip() or defaut
 
 
 class ErreurJeton(Exception):

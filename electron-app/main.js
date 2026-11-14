@@ -5,6 +5,7 @@ const http = require('http');
 const { spawn, exec } = require('child_process');
 const { createUpdater } = require('./updater');
 const activation = require('./activation');
+const { createJetonPoste, installerEntetesPoste } = require('./jetonPoste');
 
 const userDataPath = app.getPath('userData');
 const CONFIG_PATH = path.join(userDataPath, 'config.json');
@@ -242,7 +243,7 @@ function startBridge() {
 
     bridge = spawn(exePath, [bridgeConfig.tenant, bridgeConfig.gymBranchId], {
         cwd,
-        env: activation.bridgeEnv(posteIdentity),
+        env: activation.bridgeEnv(posteIdentity, process.env, { version: app.getVersion() }),
         windowsHide: true,
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -574,6 +575,16 @@ function launch(config, identity) {
     startBridge();
     startHealthLoop();
     mainWindow = createWindow(bridgeConfig);
+    installerEntetesPoste({
+        session: mainWindow.webContents.session,
+        baseUrl,
+        identity: posteIdentity,
+        jeton: posteIdentity
+            ? createJetonPoste({ identity: posteIdentity, fetch: (url, options) => net.fetch(url, options), log })
+            : null,
+        version: app.getVersion(),
+        log,
+    });
 
     mainWindow.on('closed', () => {
         mainWindow = null;

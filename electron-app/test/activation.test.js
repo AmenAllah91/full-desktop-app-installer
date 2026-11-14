@@ -144,6 +144,13 @@ test('les variables du pont portent les six valeurs du poste activé', () => {
     assert.equal(env.YOCLUB_POSTE_FILIALE, '1003');
 });
 
+test('la version du poste est remise au pont avec son identité', () => {
+    const env = bridgeEnv(identity(), { PATH: 'x', YOCLUB_POSTE_VERSION: 'héritée' }, { version: '1.4.0' });
+    assert.equal(env.YOCLUB_POSTE_VERSION, '1.4.0');
+    assert.equal(bridgeEnv(identity(), { PATH: 'x', YOCLUB_POSTE_VERSION: 'héritée' }).YOCLUB_POSTE_VERSION, undefined);
+    assert.deepEqual(bridgeEnv(null, { PATH: 'x' }, { version: '1.4.0' }), { PATH: 'x' });
+});
+
 test('sans activation, aucune variable YOCLUB_POSTE_ ne passe au pont, même héritée', () => {
     const env = bridgeEnv(null, { PATH: 'x', YOCLUB_POSTE_CLIENT_SECRET: 'fuite', YOCLUB_POSTE_FILIALE: '9' });
     assert.deepEqual(env, { PATH: 'x' });
