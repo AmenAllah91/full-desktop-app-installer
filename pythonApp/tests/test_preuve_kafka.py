@@ -242,7 +242,7 @@ class Branchements(unittest.TestCase):
         source = ast.unparse(self.arbre)
         constructions = [n for n in ast.walk(self.arbre)
                          if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "KafkaService"]
-        self.assertEqual(len(constructions), 3)
+        self.assertEqual(len(constructions), 2)
         for appel in constructions:
             self.assertIn("entetes=ENTETES_KAFKA", ast.unparse(appel))
         self.assertIn("kafka.entetes = ENTETES_KAFKA", source)

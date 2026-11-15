@@ -21,7 +21,6 @@ from services.MonitorZkem import monitor_zkem
 from services.adapters import PlcommAdapter, MachineType
 from services.common import zk_sdk_lock, tcp_reachable
 from services.captureFingerPrint import FingerprintCapture
-from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
 from config import YOCLUB_BASE_URL
 from remote_commands import BRIDGE_VERSION
@@ -252,10 +251,6 @@ pointage_kafka = KafkaService(kafka_broker=KafkaBroker,
                               group_id=f"pointage_{_KAFKA_GROUP_SUFFIX}",
                               auto_offset_reset="latest",
                               entetes=ENTETES_KAFKA)
-publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker,
-                                   group_id=f"photo_publish_{_KAFKA_GROUP_SUFFIX}",
-                                   auto_offset_reset="latest",
-                                   entetes=ENTETES_KAFKA)
 fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker,
                                  group_id=f"fingerprint_{_KAFKA_GROUP_SUFFIX}",
                                  auto_offset_reset="latest",
@@ -286,8 +281,6 @@ LOCK_TIMEOUT = 10
 QUEUE_TIMEOUT = 5
 MONITORING_INTERVAL = 0.1
 
-TOPIC_CONSUME_PUBLISH_PHOTO = "launch_publish_photo"
-TOPIC_PRODUCE_PUBLISH_PHOTO = "finish_publish_photo"
 
 
 # ------------------------------------------------------------------ #
@@ -1407,38 +1400,6 @@ def curentconf():
         return jsonify({"error": str(e)}), 500
 
 
-def consume_publish_photo():
-    def handle_photo_publish(message):
-        try:
-            data = json.loads(message)
-            gym_branch_id = data.get("gymBranchId")
-            user_pin = str(data.get("userPin"))
-            machine_id = data.get("machineId")
-            ip = data.get("addresseip")
-            port = data.get("port")
-
-            process_user_photo(user_pin, gym_branch_id, machine_id, ip, port)
-
-        except Exception as e:
-            logging.error(f"❌ Error processing launch_publish_photo message: {e}")
-
-    backoff = 1
-    while not stop_event_kafka.is_set():
-        try:
-            publish_photo_kafka.consume(topic=TOPIC_CONSUME_PUBLISH_PHOTO, on_message=handle_photo_publish)
-            backoff = 1
-        except Exception as e:
-            msg = str(e)
-            log_memory_usage(message="photo_publish_consumer_error")
-            logging.error("Error in publish photo consumption loop: %s", e)
-
-            if "UNKNOWN_TOPIC_OR_PART" in msg or "UnknownTopicOrPartition" in msg:
-                time.sleep(60)
-            else:
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 30)
-
-
 def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: str = None, port: int = None):
     # Comparaison en str : l'appelant Kafka fournit un int, l'URL Flask un int,
     # currentGymBranchId est une str. Sans cast la condition était toujours vraie
@@ -1460,13 +1421,11 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
             with open(photo_path, "rb") as f:
                 encoded = base64.b64encode(f.read()).decode("utf-8")
 
-            payload = {
+            logging.info("✅ Photo lue sur la pointeuse pour le PIN %s", user_pin)
+            return {
                 "userPin": user_pin,
                 "photo": encoded
             }
-            publish_photo_kafka.produce(TOPIC_PRODUCE_PUBLISH_PHOTO, json.dumps(payload))
-            logging.info(f"✅ Published photo for user {user_pin} to Kafka.")
-            return payload
         else:
             logging.error(f"❌ Failed to download photo for user {user_pin}.")
             return None
@@ -1475,7 +1434,6 @@ def process_user_photo(user_pin: str, gym_branch_id: str, machine_id: int, ip: s
 def start_kafka_consumers():
     topics = [
         f'new_access_request_{tenant}',
-        TOPIC_CONSUME_PUBLISH_PHOTO,
         f'fingerprint_actions_{tenant}',
     ]
     for topic in topics:
@@ -1485,12 +1443,10 @@ def start_kafka_consumers():
             pointage_kafka.ensure_topic(topic)
 
     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
-    photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
     fingerprint_actions_thread = threading.Thread(target=consume_fingerprint_client, daemon=True,
                                                   name="FingerprintActionsThread")
 
     pointage_thread.start()
-    photo_publish_thread.start()
     fingerprint_actions_thread.start()
     logging.info("Kafka consumer threads started")
 
@@ -1508,8 +1464,6 @@ from pathlib import Path
 
 UPLOAD_DIR = Path(TEMP_DIR) / "faces"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-document_manager_service = DocumentManagerService()
 
 JPEG_MAGIC = b"\xff\xd8\xff"
 
@@ -1536,10 +1490,10 @@ def upload_face_multipart():
     dst_name = f"verify_biophoto_9_{pin}.jpg"
     dst_path = UPLOAD_DIR / secure_filename(dst_name)
 
-    # Résolution de la photo : celle envoyée dans la requête, sinon MinIO.
-    # On ne réutilise PLUS un fichier déjà présent sur ce PC : un JPG vide écrit
-    # une seule fois empoisonnait le poste définitivement, la branche « le
-    # fichier existe » l'emportant à tous les envois suivants.
+    if not (file and file.filename):
+        logging.error("❌ Photo manquante pour le PIN %s", pin)
+        return jsonify({"pin": pin, "error": "Photo manquante"}), 400
+
     if file and file.filename:
         data = file.read()
         if not data:
@@ -1552,17 +1506,6 @@ def upload_face_multipart():
                             "error": "Le fichier reçu n'est pas un JPEG"}), 400
         _write_photo_atomically(dst_path, data)
         logging.info("📥 Photo enregistrée : %s (%s octets)", dst_path, len(data))
-
-    elif document_manager_service.download_faceid_photo(pin, tenant, dst_path):
-        logging.info("☁️ Biophoto récupérée depuis MinIO : %s", dst_path)
-
-    else:
-        logging.error("❌ Aucune biophoto disponible pour le PIN %s", pin)
-        return jsonify({
-            "pin": pin,
-            "error": "Aucune biophoto pour ce PIN, ni dans la requête ni dans "
-                     "MinIO : une nouvelle saisie est nécessaire"
-        }), 404
 
     report = {}
     MAX_UPLOAD_RETRIES = 3
@@ -1850,8 +1793,7 @@ def health():
         # relance de lui-même.
         alive = {t.name for t in threading.enumerate()}
         expected = ("DeviceQueueThread", "MachineWatchdog", "MachineRefresh",
-                    "PointageClientThread", "PhotoPublishThread",
-                    "FingerprintActionsThread")
+                    "PointageClientThread", "FingerprintActionsThread")
         threads = {name: (name in alive) for name in expected}
         dead = [name for name, ok in threads.items() if not ok]
 
