@@ -7,8 +7,7 @@ import pywintypes
 
 from domain import AccessMachine
 from config import KAFKA_TOPIC
-from kafka_service.kafkaservice import KafkaService
-from services.MachineMonitor import make_rt_json
+from services.MachineMonitor import make_rt_json, kafka
 from services.websocket import send_pointage, send_machine_status
 from services.common import zk_sdk_lock, tcp_reachable
 
@@ -48,8 +47,7 @@ class ZkemEvents:
         self.m = m
         self.tenant = tenant
         self.gym_branch_id = gym_branch_id
-        from os import getenv
-        self.kafka = KafkaService(getenv("KAFKA_BROKER"), f"group_rt_{tenant}")
+        self.kafka = kafka
         self.last_event_time = time.time()
 
     def OnAttTransactionEx(self, enroll, is_invalid,

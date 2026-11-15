@@ -23,6 +23,11 @@ ROUTE_COMMANDES = "/gym-management/api/poste/commandes/"
 PART_DE_VIE = 0.8
 DELAI_JETON = 10
 DELAI_LECTURE = 5
+RELANCE_JETON_KAFKA = 30
+ENTETE_JETON = "X-Yoclub-Poste"
+ENTETE_FILIALE = "X-Yoclub-Filiale"
+ENTETE_NUMERO = "X-Yoclub-Poste-Numero"
+ENTETE_VERSION = "X-Yoclub-Poste-Version"
 
 logger = logging.getLogger("identite_poste")
 
@@ -124,12 +129,16 @@ class ClientPoste:
         self.base_url = base_url.rstrip("/")
         self.version = str(version)
         self._http = http or requests.Session()
+        self._horloge = horloge
         self._jeton = JetonPoste(identite, self._http, horloge)
 
     def _entetes(self):
         return {"Authorization": f"Bearer {self._jeton.valeur()}",
-                "X-Yoclub-Poste-Numero": self.identite.numero,
-                "X-Yoclub-Poste-Version": self.version}
+                ENTETE_NUMERO: self.identite.numero,
+                ENTETE_VERSION: self.version}
+
+    def entetes_kafka(self):
+        return EntetesKafkaPoste(self.identite, self._jeton, self.version, self._horloge)
 
     def get(self, chemin, params=None, timeout=DELAI_LECTURE):
         url = f"{self.base_url}{chemin}"
@@ -142,6 +151,37 @@ class ClientPoste:
     def commande_confirmee(self, command_id, params, timeout):
         reponse = self.get(f"{ROUTE_COMMANDES}{command_id}", params=params, timeout=timeout)
         return reponse.status_code == 204
+
+
+class EntetesKafkaPoste:
+
+    def __init__(self, identite, jeton, version, horloge=time.monotonic):
+        self._fixes = [(ENTETE_FILIALE, str(identite.filiale).encode("utf-8")),
+                       (ENTETE_NUMERO, str(identite.numero).encode("utf-8")),
+                       (ENTETE_VERSION, str(version).encode("utf-8"))]
+        self._jeton = jeton
+        self._horloge = horloge
+        self._reessayer_a = 0.0
+
+    def __call__(self):
+        entetes = []
+        valeur = self._valeur_jeton()
+        if valeur:
+            entetes.append((ENTETE_JETON, valeur.encode("utf-8")))
+        return entetes + list(self._fixes)
+
+    def _valeur_jeton(self):
+        if self._horloge() < self._reessayer_a:
+            return None
+        try:
+            return self._jeton.valeur()
+        except ErreurJeton as exc:
+            raison = str(exc)
+        except Exception as exc:
+            raison = type(exc).__name__
+        self._reessayer_a = self._horloge() + RELANCE_JETON_KAFKA
+        logger.warning("Messages Kafka envoyés sans preuve du poste pendant %s s : %s", RELANCE_JETON_KAFKA, raison)
+        return None
 
 
 def _vers_machines(donnees):

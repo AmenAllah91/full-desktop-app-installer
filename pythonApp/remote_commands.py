@@ -35,14 +35,15 @@ def enabled(env=None):
     return str(value).strip().lower() in ("1", "true", "yes", "oui")
 
 
-def start(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=None):
+def start(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=None, entetes=None):
     if not enabled():
         logger.info("Commandes à distance désactivées (REMOTE_COMMANDS_ENABLED absent)")
         return None
     if not (tenant and gym_branch_id and kafka_broker and base_url):
         logger.warning("Commandes à distance non démarrées : identité ou adresses manquantes")
         return None
-    runner = RemoteCommands(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=poste)
+    runner = RemoteCommands(tenant, gym_branch_id, kafka_broker, pointage_topic, base_url, poste=poste,
+                            entetes=entetes)
     runner.start()
     logger.info("Commandes à distance démarrées (%s, filiale %s)", tenant, gym_branch_id)
     return runner
@@ -128,7 +129,7 @@ class RemoteCommands:
     def __init__(self, tenant, gym_branch_id, kafka_broker, pointage_topic, base_url,
                  producer=None, consumer_factory=None, http_get=None, now_ms=None,
                  device_context=None, device_contexts=None, publish_passage=None,
-                 reachable=None, sdk_lock=None, sleep=None, poste=None):
+                 reachable=None, sdk_lock=None, sleep=None, poste=None, entetes=None, admin_factory=None):
         self.tenant = tenant
         self.gym_branch_id = str(gym_branch_id)
         self.kafka_broker = kafka_broker
@@ -147,6 +148,8 @@ class RemoteCommands:
         self._sleep = sleep or time.sleep
         self._stop = threading.Event()
         self._poste = poste
+        self._entetes = entetes
+        self._admin_factory = admin_factory or self._new_admin
 
     def start(self):
         if self._producer is None:
@@ -291,11 +294,28 @@ class RemoteCommands:
 
     def _send(self, topic, payload):
         try:
-            self._producer.produce(topic, json.dumps(payload).encode("utf-8"))
+            valeur = json.dumps(payload).encode("utf-8")
+            entetes = self._entetes_du_poste()
+            if entetes:
+                self._producer.produce(topic, valeur, headers=entetes)
+            else:
+                self._producer.produce(topic, valeur)
             self._producer.poll(0)
             self._producer.flush(2)
         except Exception as ex:
             logger.warning("Envoi sur %s impossible : %s", topic, ex)
+
+    def _entetes_du_poste(self):
+        if self._entetes is None:
+            return None
+        try:
+            return self._entetes()
+        except Exception as ex:
+            logger.warning("En-têtes du poste indisponibles, message envoyé sans : %s", type(ex).__name__)
+            return None
+
+    def _new_admin(self):
+        return AdminClient({"bootstrap.servers": self.kafka_broker})
 
     def _new_consumer(self):
         return Consumer({
@@ -307,8 +327,11 @@ class RemoteCommands:
 
     def _ensure_topic(self):
         try:
-            admin = AdminClient({"bootstrap.servers": self.kafka_broker})
+            admin = self._admin_factory()
             if self.command_topic in admin.list_topics(timeout=5).topics:
+                return
+            if self._poste is not None:
+                logger.error("file %s absente : à créer par tenant-manager", self.command_topic)
                 return
             admin.create_topics([NewTopic(self.command_topic, num_partitions=1, replication_factor=1)])[
                 self.command_topic].result(timeout=10)

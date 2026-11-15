@@ -8,7 +8,7 @@ import time
 logger = logging.getLogger(__name__)
 
 class KafkaService:
-    def __init__(self, kafka_broker: str, group_id: str, auto_offset_reset: str = 'earliest'):
+    def __init__(self, kafka_broker: str, group_id: str, auto_offset_reset: str = 'earliest', entetes=None):
         """Initialize Kafka producer and consumer with the provided configurations.
 
         auto_offset_reset ne s'applique QUE lorsqu'aucun offset n'est commité pour
@@ -42,6 +42,7 @@ class KafkaService:
         self.consumer = None
         self._admin = AdminClient({'bootstrap.servers': kafka_broker})
         self._broker = kafka_broker
+        self.entetes = entetes
 
     def ensure_topic(self, topic: str, num_partitions: int = 1, replication_factor: int = 1):
         """Create the topic if it does not already exist on the broker."""
@@ -59,6 +60,25 @@ class KafkaService:
                 return
             logger.warning("Could not create topic '%s': %s", topic, e)
 
+    def verifier_topic(self, topic: str):
+        try:
+            if topic in self._admin.list_topics(timeout=5).topics:
+                return True
+        except Exception as e:
+            logger.warning("Présence de la file %s non vérifiée : %s", topic, e)
+            return False
+        logger.error("file %s absente : à créer par tenant-manager", topic)
+        return False
+
+    def _entetes_du_poste(self):
+        if self.entetes is None:
+            return None
+        try:
+            return self.entetes()
+        except Exception as e:
+            logger.warning("En-têtes du poste indisponibles, message envoyé sans : %s", type(e).__name__)
+            return None
+
     def produce(self, topic: str, message):
         """Send a message to the specified Kafka topic."""
         json_message = json.dumps(message) if isinstance(message, dict) else str(message)
@@ -68,7 +88,11 @@ class KafkaService:
                 logger.error("Kafka delivery failed to %s: %s", topic, err)
 
         try:
-            self.producer.produce(topic, value=json_message, callback=delivery_report)
+            entetes = self._entetes_du_poste()
+            if entetes:
+                self.producer.produce(topic, value=json_message, headers=entetes, callback=delivery_report)
+            else:
+                self.producer.produce(topic, value=json_message, callback=delivery_report)
             self.producer.poll(0)
         except Exception as e:
             logger.error("Kafka produce exception for topic %s: %s", topic, e)

@@ -238,23 +238,28 @@ tenant, currentGymBranchId = _resolve_identity()
 # messages de son club, jamais une part répartie entre postes.
 # auto.offset.reset=latest : ces topics portent des commandes, pas un
 # historique à rejouer — au premier démarrage on part de maintenant.
-_KAFKA_GROUP_SUFFIX = f"{tenant}_{currentGymBranchId}"
-pointage_kafka = KafkaService(kafka_broker=KafkaBroker,
-                              group_id=f"pointage_{_KAFKA_GROUP_SUFFIX}",
-                              auto_offset_reset="latest")
-publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker,
-                                   group_id=f"photo_publish_{_KAFKA_GROUP_SUFFIX}",
-                                   auto_offset_reset="latest")
-fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker,
-                                 group_id=f"fingerprint_{_KAFKA_GROUP_SUFFIX}",
-                                 auto_offset_reset="latest")
-
 POSTE = IdentitePoste.depuis_env()
 if POSTE is not None:
     logging.info("🔐 Identité du poste présente : pointeuses et confirmations par les routes du poste")
     if POSTE.club != tenant or POSTE.filiale != str(currentGymBranchId):
         logging.warning("⚠️ L'identité du poste ne correspond pas au club ou à la filiale passés en arguments")
 machineService = service_machines(POSTE, YOCLUB_BASE_URL, version_poste(BRIDGE_VERSION), APP_DATA_DIR, AccessMachineService)
+ENTETES_KAFKA = machineService.client.entetes_kafka() if POSTE is not None else None
+
+_KAFKA_GROUP_SUFFIX = f"{tenant}_{currentGymBranchId}"
+pointage_kafka = KafkaService(kafka_broker=KafkaBroker,
+                              group_id=f"pointage_{_KAFKA_GROUP_SUFFIX}",
+                              auto_offset_reset="latest",
+                              entetes=ENTETES_KAFKA)
+publish_photo_kafka = KafkaService(kafka_broker=KafkaBroker,
+                                   group_id=f"photo_publish_{_KAFKA_GROUP_SUFFIX}",
+                                   auto_offset_reset="latest",
+                                   entetes=ENTETES_KAFKA)
+fingerprint_kafka = KafkaService(kafka_broker=KafkaBroker,
+                                 group_id=f"fingerprint_{_KAFKA_GROUP_SUFFIX}",
+                                 auto_offset_reset="latest",
+                                 entetes=ENTETES_KAFKA)
+kafka.entetes = ENTETES_KAFKA
 
 # Global variables and synchronization primitives
 device_handle = None
@@ -1473,7 +1478,10 @@ def start_kafka_consumers():
         f'fingerprint_actions_{tenant}',
     ]
     for topic in topics:
-        pointage_kafka.ensure_topic(topic)
+        if POSTE is not None:
+            pointage_kafka.verifier_topic(topic)
+        else:
+            pointage_kafka.ensure_topic(topic)
 
     pointage_thread = threading.Thread(target=consume_pointage_client, daemon=True, name="PointageClientThread")
     photo_publish_thread = threading.Thread(target=consume_publish_photo, daemon=True, name="PhotoPublishThread")
@@ -2461,7 +2469,7 @@ if __name__ == '__main__':
             import remote_commands
             from config import YOCLUB_BASE_URL
             remote_commands.start(tenant, gym_branch_id, KafkaBroker, KAFKA_TOPIC, YOCLUB_BASE_URL,
-                                  poste=getattr(machineService, "client", None))
+                                  poste=getattr(machineService, "client", None), entetes=ENTETES_KAFKA)
         except Exception:
             logging.exception("Commandes à distance non démarrées")
 
