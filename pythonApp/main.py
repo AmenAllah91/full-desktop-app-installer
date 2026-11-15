@@ -25,6 +25,7 @@ from services.documentManagerService import DocumentManagerService
 from services.machinesService import AccessMachineService
 from config import YOCLUB_BASE_URL
 from remote_commands import BRIDGE_VERSION
+from services.journalSur import masquer
 from services.MachineMonitor import (monitor_machine, make_rt_json, kafka,
                                      attempt_c3_reconnection, ensure_c3_session,
                                      synchroniser_horloge_si_besoin)
@@ -1277,7 +1278,7 @@ def _traiter_maj_creneau(json_message):
 def process_message_pointage(message):
     try:
         json_message = json.loads(message)
-        logging.info("Received message from new access request topic from tenant %s: %s", tenant, message)
+        logging.info("Received message from new access request topic from tenant %s: %s", tenant, masquer(message))
 
         # UPDATE_TIMEZONE réécrit un calendrier et ne concerne AUCUN
         # adhérent : il n'a ni userPin, ni carte, ni dates de validité. Le
@@ -1320,7 +1321,7 @@ def process_message_pointage(message):
 
 def process_fingerprint_actions(message):
     json_message = json.loads(message)
-    logging.info("Received message from fingerprint actions topic from tenant %s: %s", tenant, message)
+    logging.info("Received message from fingerprint actions topic from tenant %s: %s", tenant, masquer(message))
     required_keys = ["pin", "operation", "fingerprint_template", "finger_id"]
 
     # Filtre de branche.

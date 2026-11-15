@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from domain.DoorType import DoorType
 
@@ -16,5 +16,5 @@ class AccessMachine:
     door3: int
     door4: int
     porte_type:DoorType
-    comKey: int = 0
+    comKey: int = field(default=0, repr=False)
     currentHandle: int = -1

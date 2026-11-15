@@ -4,7 +4,11 @@ setlocal enabledelayedexpansion
 :: =======================
 :: Configuration
 :: =======================
-set VERSION=1.1.0
+for /f "usebackq delims=" %%v in (`node -p "require('./electron-app/package.json').version"`) do set VERSION=%%v
+if "%VERSION%"=="" (
+    echo ❌ Version introuvable dans electron-app\package.json
+    exit /b 1
+)
 set APP_NAME=Yo-Club
 set OUTPUT_DIR=build-output
 set ELECTRON_APP_DIR=electron-app
@@ -243,49 +247,16 @@ if errorlevel 1 (
 echo 🔍 Checking available npm scripts...
 call npm run --silent
 
-echo 🔨 Building Electron app...
-call npm run build --dry-run >nul 2>&1
+echo 🔨 Building Electron app %VERSION%...
+if exist "dist" rmdir /s /q "dist"
+call npm run build -- -c.extraMetadata.version=%VERSION%
 if errorlevel 1 (
-    echo ⚠️ No 'build' script found in package.json
-    echo 🔍 Looking for alternative build commands...
-
-    call npm run dist --dry-run >nul 2>&1
-    if not errorlevel 1 (
-        echo 🔨 Running 'npm run dist' instead...
-        call npm run dist
-    ) else (
-        call npm run make --dry-run >nul 2>&1
-        if not errorlevel 1 (
-            echo 🔨 Running 'npm run make' instead...
-            call npm run make
-        ) else (
-            call npm run package --dry-run >nul 2>&1
-            if not errorlevel 1 (
-                echo 🔨 Running 'npm run package' instead...
-                call npm run package
-            ) else (
-                call npm run electron:build --dry-run >nul 2>&1
-                if not errorlevel 1 (
-                    echo 🔨 Running 'npm run electron:build' instead...
-                    call npm run electron:build
-                ) else (
-                    echo ❌ No build script found! Available scripts:
-                    call npm run
-
-                    echo.
-                    echo 📄 Contents of package.json:
-                    type package.json
-
-                    echo.
-                    echo ⚠️ Proceeding without building Electron app...
-                    mkdir "dist\win-unpacked" 2>nul
-                    echo Placeholder > "dist\win-unpacked\README.txt"
-                )
-            )
-        )
-    )
-) else (
-    call npm run build -- -c.extraMetadata.version=%VERSION%
+    echo ❌ Electron build failed!
+    exit /b 1
+)
+if not exist "dist\win-unpacked\resources\app.asar" (
+    echo ❌ Electron build produced no app.asar!
+    exit /b 1
 )
 
 if exist "dist\win-unpacked" (
@@ -398,6 +369,8 @@ echo # identique sur tous les postes : y laisser une identite ferait demarrer
 echo # un poste vikingsgym sous celle d'empiregym. Les deux valeurs sont saisies
 echo # a la premiere ouverture de Yo-Club, poste par poste, et le pont REFUSE de
 echo # demarrer si elles manquent.
+echo.
+echo REMOTE_COMMANDS_ENABLED=1
 echo.
 echo FLASK_HOST=127.0.0.1
 echo FLASK_PORT=9998

@@ -8,7 +8,9 @@ import requests
 from confluent_kafka import Consumer, Producer, TopicPartition, OFFSET_END
 from confluent_kafka.admin import AdminClient, NewTopic
 
-BRIDGE_VERSION = "remote-1"
+from services.identitePoste import version_poste
+
+BRIDGE_VERSION = version_poste("remote-1")
 OPEN_DOOR = "OPEN_DOOR"
 CAPABILITIES = [OPEN_DOOR]
 COMMAND_TOPIC_PREFIX = "device_command_"

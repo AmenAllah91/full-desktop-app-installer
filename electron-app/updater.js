@@ -40,6 +40,21 @@ try {
 Start-Process -FilePath $App
 `;
 
+function quoted(value) {
+    const text = String(value);
+    if (text.includes('"')) throw new Error('ARGUMENT_INVALIDE');
+    return `"${text}"`;
+}
+
+function commandeInstallation(script, params) {
+    const parameters = Object.entries(params).map(([name, value]) => `-${name} ${quoted(value)}`).join(' ');
+    return {
+        command: 'cmd.exe',
+        args: [`/d /c start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ${quoted(script)} ${parameters}`],
+        options: { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true },
+    };
+}
+
 function compareVersions(a, b) {
     const left = a.split('.').map(Number);
     const right = b.split('.').map(Number);
@@ -219,14 +234,14 @@ function createUpdater({
         }
         const script = path.join(updatesDir, SCRIPT_FILE);
         fs.writeFileSync(script, INSTALL_SCRIPT, 'utf-8');
-        const child = spawn('powershell.exe', [
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
-            '-Installer', ready.file,
-            '-App', appExe,
-            '-ParentPid', String(pid),
-            '-Report', path.join(updatesDir, REPORT_FILE),
-            '-Version', ready.version,
-        ], { detached: true, stdio: 'ignore', windowsHide: true });
+        const lancement = commandeInstallation(script, {
+            Installer: ready.file,
+            App: appExe,
+            ParentPid: String(pid),
+            Report: path.join(updatesDir, REPORT_FILE),
+            Version: ready.version,
+        });
+        const child = spawn(lancement.command, lancement.args, lancement.options);
         child.unref();
         if (timer) clearTimer(timer);
         timer = null;
@@ -264,4 +279,4 @@ function createUpdater({
     };
 }
 
-module.exports = { createUpdater, compareVersions, validRelease, installerName, INSTALL_SCRIPT };
+module.exports = { createUpdater, compareVersions, validRelease, installerName, commandeInstallation, INSTALL_SCRIPT };

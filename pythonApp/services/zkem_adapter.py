@@ -20,6 +20,7 @@ import win32com.client
 from services.adapters import DeviceAdapter
 from services.common import zk_sdk_lock, tcp_reachable
 from services.zkem_timezone import appliquer_timezone, ecrire_creneau
+from services.journalSur import commande_masquee
 
 
 class ZkemAdapter(DeviceAdapter):
@@ -299,7 +300,7 @@ class ZkemAdapter(DeviceAdapter):
             com_key_arg                       # comKey
         ]
 
-        logging.info("📡 [FACE] Lancement exe : %s", subprocess.list2cmdline(cmd))
+        logging.info("📡 [FACE] Lancement exe : %s", subprocess.list2cmdline(commande_masquee(cmd, len(cmd) - 1)))
         try:
             res = subprocess.run(
                 cmd,

@@ -119,7 +119,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             if has_comkey(com_key):
                 try:
                     base.SetCommPassword(int(com_key))
-                    logging.info("ComKey détecté et appliqué pour %s : %s", ip, com_key)
+                    logging.info("ComKey détecté et appliqué pour %s", ip)
                 except Exception as ex:
                     logging.warning("⚠️ SetCommPassword impossible pour %s : %s", ip, ex)
             else:

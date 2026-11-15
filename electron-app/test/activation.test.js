@@ -148,7 +148,7 @@ test('la version du poste est remise au pont avec son identité', () => {
     const env = bridgeEnv(identity(), { PATH: 'x', YOCLUB_POSTE_VERSION: 'héritée' }, { version: '1.4.0' });
     assert.equal(env.YOCLUB_POSTE_VERSION, '1.4.0');
     assert.equal(bridgeEnv(identity(), { PATH: 'x', YOCLUB_POSTE_VERSION: 'héritée' }).YOCLUB_POSTE_VERSION, undefined);
-    assert.deepEqual(bridgeEnv(null, { PATH: 'x' }, { version: '1.4.0' }), { PATH: 'x' });
+    assert.deepEqual(bridgeEnv(null, { PATH: 'x' }, { version: '1.4.0' }), { PATH: 'x', YOCLUB_POSTE_VERSION: '1.4.0' });
 });
 
 test('sans activation, aucune variable YOCLUB_POSTE_ ne passe au pont, même héritée', () => {

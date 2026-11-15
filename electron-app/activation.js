@@ -105,7 +105,8 @@ function bridgeEnv(identity, baseEnv = process.env, { version } = {}) {
     for (const [key, value] of Object.entries(baseEnv)) {
         if (!key.toUpperCase().startsWith(ENV_PREFIX)) env[key] = value;
     }
-    if (!identity) return env;
+    const versionEnv = version ? { YOCLUB_POSTE_VERSION: String(version) } : {};
+    if (!identity) return { ...env, ...versionEnv };
     return {
         ...env,
         YOCLUB_POSTE_CLUB: identity.club,
@@ -114,7 +115,7 @@ function bridgeEnv(identity, baseEnv = process.env, { version } = {}) {
         YOCLUB_POSTE_TOKEN_URL: identity.tokenUrl,
         YOCLUB_POSTE_NUMERO: String(identity.numero),
         YOCLUB_POSTE_FILIALE: String(identity.gymBranchId),
-        ...(version ? { YOCLUB_POSTE_VERSION: String(version) } : {}),
+        ...versionEnv,
     };
 }
 

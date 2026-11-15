@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { createUpdater, compareVersions, validRelease, installerName } = require('../updater');
+const { createUpdater, compareVersions, validRelease, installerName, commandeInstallation } = require('../updater');
 
 const BASE = 'https://integration.yo-club.app';
 const PAYLOAD = Buffer.from('installeur factice '.repeat(5000));
@@ -162,13 +162,18 @@ test('l\'installation lance le script détaché avec l\'installeur vérifié', a
     assert.equal(instance.state().status, 'installing');
     assert.equal(spawned.length, 1);
     const { command, args, options } = spawned[0];
-    assert.equal(command, 'powershell.exe');
-    assert.equal(args[args.indexOf('-Installer') + 1], path.join(dir, installerName('1.2.0')));
-    assert.equal(args[args.indexOf('-App') + 1], 'C:\\Yo-Club\\Yo-Club.exe');
-    assert.equal(args[args.indexOf('-ParentPid') + 1], '42');
-    assert.equal(args[args.indexOf('-Version') + 1], '1.2.0');
-    assert.ok(fs.readFileSync(args[args.indexOf('-File') + 1], 'utf-8').includes("-Verb RunAs"));
+    assert.equal(command, 'cmd.exe');
+    assert.equal(args.length, 1);
+    const ligne = args[0];
+    const valeur = (nom) => ligne.match(new RegExp(`-${nom} "([^"]*)"`))[1];
+    assert.ok(ligne.startsWith('/d /c start "" /b powershell.exe '));
+    assert.equal(valeur('Installer'), path.join(dir, installerName('1.2.0')));
+    assert.equal(valeur('App'), 'C:\\Yo-Club\\Yo-Club.exe');
+    assert.equal(valeur('ParentPid'), '42');
+    assert.equal(valeur('Version'), '1.2.0');
+    assert.ok(fs.readFileSync(valeur('File'), 'utf-8').includes("-Verb RunAs"));
     assert.equal(options.detached, true);
+    assert.equal(options.windowsVerbatimArguments, true);
     assert.equal(await instance.check(), instance.state());
 });
 
@@ -192,4 +197,10 @@ test('le compte rendu de la dernière installation est lu une fois puis effacé'
     instance.start();
     assert.ok(lines.some((line) => line.includes('version 1.1.0') && line.includes('en place')));
     assert.ok(!fs.existsSync(report));
+});
+
+test('la commande d\'installation refuse un argument qui casserait la ligne', () => {
+    assert.throws(() => commandeInstallation('C:\\s.ps1', { App: 'C:\\a"b.exe' }), /ARGUMENT_INVALIDE/);
+    const { args } = commandeInstallation('C:\\u\\s.ps1', { App: 'C:\\Program Files (x86)\\Yo-Club\\Yo-Club.exe' });
+    assert.ok(args[0].includes('-App "C:\\Program Files (x86)\\Yo-Club\\Yo-Club.exe"'));
 });
