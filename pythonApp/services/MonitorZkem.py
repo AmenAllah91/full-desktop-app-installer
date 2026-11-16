@@ -10,6 +10,7 @@ from config import KAFKA_TOPIC
 from services.MachineMonitor import make_rt_json, kafka
 from services.websocket import send_pointage, send_machine_status
 from services.common import zk_sdk_lock, tcp_reachable
+from services.refusPointeuse import ETAT_REFUS, SuiviVerifications, lire_validite, motif_standalone
 
 
 # ------------------------------------------------------------------ #
@@ -49,11 +50,39 @@ class ZkemEvents:
         self.gym_branch_id = gym_branch_id
         self.kafka = kafka
         self.last_event_time = time.time()
+        self.suivi = SuiviVerifications()
+
+    def OnVerify(self, user_id):
+        self.last_event_time = time.time()
+        self.suivi.verifie(user_id)
+
+    def publier_refus(self, pin, motif):
+        payload = make_rt_json(
+            machine_id=self.m.id,
+            ip=self.ip,
+            mtype="STANDALONE_NEW_FIRMWARE",
+            pin=int(pin),
+            state_code=ETAT_REFUS,
+            dt=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            door_id=1,
+            card_no=None,
+            gym_branch_id=self.gym_branch_id,
+            porte_type=self.m.porte_type or "",
+            tenant=self.tenant,
+            deny_reason=motif,
+        )
+        logging.info(payload)
+        self.kafka.produce(KAFKA_TOPIC, payload)
+        try:
+            send_pointage(json.loads(payload), self.gym_branch_id)
+        except Exception as ex:
+            logging.error("[WebSocket] Erreur envoi WS: %s", ex)
 
     def OnAttTransactionEx(self, enroll, is_invalid,
                            state, verify,
                            Y, M, D, h, m, s, workcode):
         self.last_event_time = time.time()
+        self.suivi.passage(enroll)
         ts = datetime(Y, M, D, h, m, s).strftime("%Y-%m-%d %H:%M:%S")
         payload = make_rt_json(
             machine_id = self.m.id,
@@ -83,6 +112,19 @@ class ZkemEvents:
                 ctx.adapter.last_seen = time.time()
         except Exception:
             pass
+
+
+def signaler_refus(base, numero_machine, evenements, ip):
+    for pin in evenements.suivi.refus_echus():
+        try:
+            with zk_sdk_lock:
+                connu, fin_validite = lire_validite(base, numero_machine, pin)
+            if not connu:
+                logging.info("ZKEM %s : vérification sans passage, identifiant %s non confirmé, rien publié", ip, pin)
+                continue
+            evenements.publier_refus(pin, motif_standalone(fin_validite))
+        except Exception as ex:
+            logging.error("ZKEM %s : refus du pin %s non publié : %s", ip, pin, ex)
 
 
 # ------------------------------------------------------------------ #
@@ -228,6 +270,7 @@ def monitor_zkem(machine: AccessMachine, ip: str, port: int,
             # exécutée toutes les 50 ms — la contention reste négligeable.
             with zk_sdk_lock:
                 pythoncom.PumpWaitingMessages()
+            signaler_refus(base, machine_number, events_instance, ip)
             time.sleep(0.05)
     finally:
         if base is not None:

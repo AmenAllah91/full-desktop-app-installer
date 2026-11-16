@@ -16,6 +16,7 @@ from services.DeviceMAnager import DeviceContext
 from services.addAndAuthorizeUser import connect_to_device
 from services.websocket import send_pointage, send_machine_status_from_ctx
 from services.common import throttle_event
+from services.refusPointeuse import motif_c3
 
 PLCOMPRO_URL = getenv("PLCOMPRO_URL")
 if not PLCOMPRO_URL:
@@ -517,6 +518,7 @@ def monitor_machine(ctx: DeviceContext, stop_evt):
                         gym_branch_id=BRANCH_ID,
                         porte_type=porte.value,
                         tenant=TENANT,
+                        deny_reason=motif_c3(state),
                     )
 
                     kafka.produce(KAFKA_POINTAGE_TOPIC, payload)
@@ -591,6 +593,7 @@ def make_rt_json(
     gym_branch_id: str,
     porte_type: str,
     tenant: str = "",
+    deny_reason: Optional[str] = None,
 ) -> str:
     payload = {
         "id_machine": machine_id,
@@ -605,6 +608,8 @@ def make_rt_json(
         "porte_type": porte_type,
         "tenant": tenant,
     }
+    if deny_reason:
+        payload["deny_reason"] = deny_reason
     return json.dumps(payload, ensure_ascii=False)
 
 
