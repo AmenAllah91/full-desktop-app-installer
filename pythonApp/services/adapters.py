@@ -43,7 +43,7 @@ class DeviceAdapter(ABC):
     # ---- opérations métier
     @abstractmethod
     def add_user(self, pin, name, card, start, end,
-                 timezone_slot=None, weekly_schedule=None) -> bool: ...
+                 timezone_slot=None, weekly_schedule=None, privilege=None) -> bool: ...
 
     @abstractmethod
     def delete_user(self, pin, finger_id=None) -> bool: ...
@@ -375,7 +375,7 @@ class PlcommAdapter(DeviceAdapter):  # ✅ hérite !
             return None
 
     def add_user(self, pin, name, card, start, end,
-                 timezone_slot=None, weekly_schedule=None):
+                 timezone_slot=None, weekly_schedule=None, privilege=None):
         carte = self._carte_normalisee(card)
 
         # to do set the card to 0 for old user

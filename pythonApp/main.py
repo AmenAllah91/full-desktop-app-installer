@@ -1093,7 +1093,8 @@ def process_device_queue() -> None:
                                                   task["start_date"],
                                                   task["end_date"],
                                                   task.get("timezone_slot"),
-                                                  task.get("weekly_schedule"))
+                                                  task.get("weekly_schedule"),
+                                                  privilege=task.get("privilege"))
                             if ok:
                                 # Le C3 pose son creneau ICI et non dans
                                 # add_user : chez lui le calendrier vit dans
@@ -1304,6 +1305,7 @@ def process_message_pointage(message):
                             "timezoneSlot", json_message.get("timezoneSlot")),
                         "weekly_schedule": machine.get(
                             "weeklySchedule", json_message.get("weeklySchedule")),
+                        "privilege": json_message.get("machinePrivilege"),
                     })
                 else:
                     logging.error("Missing required fields in machine configuration.")
@@ -2119,6 +2121,7 @@ def enqueue_access_tasks():
             "end_date": data["endDate"],
             "timezone_slot": m.get("timezoneSlot", data.get("timezoneSlot")),
             "weekly_schedule": m.get("weeklySchedule", data.get("weeklySchedule")),
+            "privilege": data.get("machinePrivilege"),
         }
         add_task_to_queue(task)
         queued += 1

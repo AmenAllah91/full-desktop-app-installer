@@ -21,6 +21,7 @@ from services.adapters import DeviceAdapter
 from services.common import zk_sdk_lock, tcp_reachable
 from services.zkem_timezone import appliquer_timezone, ecrire_creneau
 from services.journalSur import commande_masquee
+from services.privilegeMachine import privilege_machine
 
 
 class ZkemAdapter(DeviceAdapter):
@@ -126,7 +127,7 @@ class ZkemAdapter(DeviceAdapter):
 
     @_ensure_conn
     def add_user(self, pin, name, card_no, start_time, end_time,
-                 timezone_slot=None, weekly_schedule=None) -> bool:
+                 timezone_slot=None, weekly_schedule=None, privilege=None) -> bool:
         """Ajout + règle de validité + créneau horaire hebdomadaire.
 
         timezone_slot / weekly_schedule sont facultatifs : un cloud plus
@@ -136,8 +137,8 @@ class ZkemAdapter(DeviceAdapter):
         self.zk.EnableDevice(self.mn, False)
         if card_no:
             self.zk.SetStrCardNumber(str(card_no))
-            # user privileges 0 : user normal , 1 : enroller , 2 : admin , 3 : superadmin
-        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "", 3, True)
+        ok = self.zk.SSR_SetUserInfo(self.mn, pin, name, "",
+                                     privilege_machine(pin, privilege), True)
         if not ok:
             logging.error("SSR_SetUserInfo KO (pin=%s) err=%s",
                           pin, zkem_last_error(self.zk))
