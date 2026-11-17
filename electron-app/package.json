@@ -1,6 +1,6 @@
 {
   "name": "yo-club",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A desktop application for managing biometric machines",
   "main": "main.js",
   "scripts": {
